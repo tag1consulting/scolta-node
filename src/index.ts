@@ -11,4 +11,6 @@ export * from "./config.js";
 export * from "./markdown.js";
 export * from "./storage.js";
 export * from "./cache.js";
+export * as html from "./html.js";
+export * from "./export.js";
 export * as ai from "./ai/index.js";
