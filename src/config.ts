@@ -112,7 +112,7 @@ const PRESETS: Record<string, PresetDefinition> = {
  * typed coercion PHP performs on its typed properties. CMS config layers store
  * everything as strings; this restores the declared type.
  */
-const FIELD_KINDS: Record<string, FieldKind> = {
+export const FIELD_KINDS: Record<string, FieldKind> = {
   ai_provider: "string",
   ai_api_key: "string",
   ai_model: "string",
