@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { CborEncoder } from "./cbor.js";
 import { DeltaEncoder } from "./delta-encoder.js";
@@ -232,14 +233,29 @@ export function buildMetadata(
 }
 
 /** Copy bundled pagefind runtime assets into the build dir if vendored. */
+/**
+ * Locate the vendored `assets/pagefind` directory by walking up from this
+ * module. The module's depth differs between the `src/` layout (tests:
+ * src/index/) and the bundled `dist/` layout, so a fixed `../..` is wrong in one
+ * of them — walk up until `assets/pagefind/pagefind.js` is found.
+ */
+function findPagefindAssetsDir(): string | null {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, "assets", "pagefind");
+    if (fs.existsSync(path.join(candidate, "pagefind.js"))) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 export function copyAssets(buildDir: string): void {
-  const assetsDir = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    "..",
-    "..",
-    "assets",
-    "pagefind",
-  );
+  const assetsDir = findPagefindAssetsDir();
+  if (assetsDir === null) return;
   for (const asset of ["pagefind.js", "pagefind-worker.js", "wasm.en.pagefind", "wasm.unknown.pagefind"]) {
     const src = path.join(assetsDir, asset);
     if (fs.existsSync(src)) {

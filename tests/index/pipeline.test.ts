@@ -80,6 +80,11 @@ describe("full build", () => {
     IndexBuildOrchestrator.verifyIndexComplete(od);
     const fragDir = path.join(od, "pagefind", "fragment");
     expect(fs.readdirSync(fragDir).filter((f) => f.endsWith(".pf_fragment")).length).toBe(20);
+    // The built dir must be servable: the Pagefind runtime assets are copied in
+    // (guards the copyAssets path-resolution regression caught in the E2E).
+    for (const asset of ["pagefind.js", "wasm.en.pagefind"]) {
+      expect(fs.existsSync(path.join(od, "pagefind", asset)), `missing runtime asset ${asset}`).toBe(true);
+    }
     // A common recipe term resolves in the index.
     expect("recip" in decodeWords(od) || "recipe" in decodeWords(od)).toBe(true);
   });
