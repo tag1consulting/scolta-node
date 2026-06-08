@@ -15,3 +15,5 @@ export * as html from "./html.js";
 export * from "./export.js";
 export * as ai from "./ai/index.js";
 export * as index from "./index/index.js";
+export * from "./environment.js";
+export * from "./health.js";

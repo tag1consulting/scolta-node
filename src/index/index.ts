@@ -24,3 +24,5 @@ export * from "./coordinator.js";
 export * from "./merger.js";
 export * from "./orchestrator.js";
 export * from "./indexer.js";
+export * from "./pagefind.js";
+export * from "./resolver.js";
