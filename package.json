@@ -1,0 +1,57 @@
+{
+  "name": "scolta",
+  "version": "1.0.0",
+  "description": "AI-powered search with Pagefind — Node/TypeScript language binding",
+  "license": "MIT",
+  "author": "Tag1 Consulting <info@tag1.com>",
+  "homepage": "https://tag1.com",
+  "keywords": ["search", "ai", "pagefind", "wasm", "scoring"],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "assets", "README.md", "CHANGELOG.md", "LICENSE"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.0.0",
+    "marked": "^12.0.0",
+    "parse5": "^7.1.2",
+    "proper-lockfile": "^4.1.2",
+    "snowball-stemmers": "^0.6.0"
+  },
+  "peerDependencies": {
+    "pagefind": "^1.3.0"
+  },
+  "peerDependenciesMeta": {
+    "pagefind": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^20.11.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^1.6.0"
+  }
+}
