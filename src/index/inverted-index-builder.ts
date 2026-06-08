@@ -32,7 +32,22 @@ export interface TokenData {
   content: string;
 }
 
-export interface BuildResult {
+/**
+ * The subset of ContentItem fields `buildFromTokenData` reads. The orchestrator
+ * passes a lightweight proxy (no body/title) for cache-hit and cached-reference
+ * pages, so the page record is built from token data + these fields alone.
+ */
+export interface ItemMeta {
+  id: string;
+  url: string;
+  date: string;
+  siteName: string;
+  language: string;
+  filters: Record<string, string | string[]>;
+  sortable: Record<string, string>;
+}
+
+export interface PartialIndex {
   index: InvertedIndex;
   pages: Map<number, IndexPage>;
 }
@@ -63,7 +78,7 @@ export class InvertedIndexBuilder {
     this.stemmer = stemmer;
   }
 
-  build(items: ContentItem[], pageOffset = 0): BuildResult {
+  build(items: ContentItem[], pageOffset = 0): PartialIndex {
     const tokenDataList: { item: ContentItem; tokenData: TokenData }[] = [];
     for (const item of items) {
       const td = this.tokenizeItem(item);
@@ -105,9 +120,9 @@ export class InvertedIndexBuilder {
   }
 
   buildFromTokenData(
-    tokenDataList: { item: ContentItem; tokenData: TokenData }[],
+    tokenDataList: { item: ItemMeta; tokenData: TokenData }[],
     pageOffset = 0,
-  ): BuildResult {
+  ): PartialIndex {
     const index: InvertedIndex = new Map();
     const pages = new Map<number, IndexPage>();
     let pageNum = pageOffset;
