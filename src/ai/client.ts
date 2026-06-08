@@ -1,0 +1,201 @@
+/**
+ * Provider-agnostic AI client for LLM API calls.
+ *
+ * Port of `Tag1\Scolta\AiClient` on the global `fetch` (Guzzle → fetch is
+ * ~1:1). Supports Anthropic's native API and any OpenAI-compatible
+ * chat-completions endpoint (Ollama, LiteLLM and self-hosted gateways via the
+ * OpenAI-compatible `base_url` path).
+ */
+
+import { ApiKeyInvalidError, ApiKeyMissingError, RateLimitError } from "../errors.js";
+
+export const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+export const ANTHROPIC_API_VERSION = "2023-06-01";
+export const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+export interface AiClientConfig {
+  provider?: string;
+  api_key?: string;
+  model?: string;
+  api_version?: string;
+  timeout?: number;
+  base_url?: string;
+}
+
+export interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+/** Injectable fetch, matching the global `fetch` signature. */
+export type FetchLike = typeof fetch;
+
+export class AiClient {
+  readonly provider: string;
+  readonly apiKey: string;
+  readonly model: string;
+  readonly apiVersion: string;
+  readonly timeout: number;
+  readonly baseUrl: string;
+  private readonly fetchImpl: FetchLike;
+
+  constructor(config: AiClientConfig, fetchImpl?: FetchLike) {
+    this.provider = config.provider ?? "anthropic";
+    this.apiKey = config.api_key ?? "";
+    this.model = config.model ?? "claude-sonnet-4-5-20250929";
+    this.apiVersion = config.api_version ?? ANTHROPIC_API_VERSION;
+    this.timeout = Math.trunc(Number(config.timeout ?? 30));
+
+    if (this.provider === "openai") {
+      let baseUrl = config.base_url ?? OPENAI_API_URL;
+      // If only a domain/origin is provided (no path), append the standard
+      // OpenAI chat completions path — supports LiteLLM and other proxies that
+      // return a base URL without a trailing API path.
+      const path = AiClient.urlPath(baseUrl);
+      if (path === "" || path === "/") {
+        baseUrl = baseUrl.replace(/\/+$/, "") + "/v1/chat/completions";
+      }
+      this.baseUrl = baseUrl;
+    } else {
+      this.baseUrl = config.base_url ?? ANTHROPIC_API_URL;
+    }
+
+    this.fetchImpl = fetchImpl ?? fetch;
+  }
+
+  private static urlPath(url: string): string {
+    try {
+      return new URL(url).pathname || "/";
+    } catch {
+      return "/";
+    }
+  }
+
+  /** Send a single-turn message and return the response text. */
+  async message(
+    systemPrompt: string,
+    userMessage: string,
+    maxTokens = 1024,
+    model?: string,
+  ): Promise<string> {
+    return this.sendRequest(systemPrompt, [{ role: "user", content: userMessage }], maxTokens, model);
+  }
+
+  /** Send a multi-turn conversation and return the response text. */
+  async conversation(
+    systemPrompt: string,
+    messages: ChatMessage[],
+    maxTokens = 1024,
+    model?: string,
+  ): Promise<string> {
+    return this.sendRequest(systemPrompt, messages, maxTokens, model);
+  }
+
+  private async sendRequest(
+    systemPrompt: string,
+    messages: ChatMessage[],
+    maxTokens: number,
+    model?: string,
+  ): Promise<string> {
+    if (!this.apiKey) {
+      throw new ApiKeyMissingError(
+        "Scolta AI API key not configured. Set the api_key in your platform's Scolta configuration.",
+      );
+    }
+
+    const useModel = model || this.model;
+
+    if (this.provider === "openai") {
+      return this.sendOpenai(systemPrompt, messages, maxTokens, useModel);
+    }
+    return this.sendAnthropic(systemPrompt, messages, maxTokens, useModel);
+  }
+
+  private async sendAnthropic(
+    systemPrompt: string,
+    messages: ChatMessage[],
+    maxTokens: number,
+    model: string,
+  ): Promise<string> {
+    const response = await this.post(this.baseUrl, {
+      "x-api-key": this.apiKey,
+      "anthropic-version": this.apiVersion,
+      "Content-Type": "application/json",
+    }, {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages,
+    });
+    const data = await this.parseJson(response);
+    try {
+      return (data as any).content[0].text;
+    } catch {
+      return "";
+    }
+  }
+
+  private async sendOpenai(
+    systemPrompt: string,
+    messages: ChatMessage[],
+    maxTokens: number,
+    model: string,
+  ): Promise<string> {
+    const allMessages = [{ role: "system", content: systemPrompt }, ...messages];
+    const response = await this.post(this.baseUrl, {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    }, {
+      model,
+      max_tokens: maxTokens,
+      messages: allMessages,
+    });
+    const data = await this.parseJson(response);
+    try {
+      return (data as any).choices[0].message.content;
+    } catch {
+      return "";
+    }
+  }
+
+  private async post(
+    url: string,
+    headers: Record<string, string>,
+    body: unknown,
+  ): Promise<Response> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeout * 1000),
+      });
+    } catch (exc) {
+      throw new Error(`Scolta AI API request failed: ${String(exc)}`, { cause: exc });
+    }
+
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 401) {
+        throw new ApiKeyInvalidError(
+          "Scolta AI API key is invalid or expired. Verify the key in your Scolta configuration.",
+        );
+      }
+      if (status === 429) {
+        const retryAfter = response.headers.get("Retry-After") || null;
+        throw new RateLimitError("Scolta AI API rate limit reached.", retryAfter);
+      }
+      throw new Error(`Scolta AI API request failed: HTTP ${status}`);
+    }
+    return response;
+  }
+
+  private async parseJson(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch (exc) {
+      throw new Error(`Scolta AI API returned malformed JSON: ${String(exc)}`, { cause: exc });
+    }
+  }
+}
