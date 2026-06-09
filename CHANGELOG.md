@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+## [1.0.0] - 2026-06-09
 
 - **Stem with Pagefind's own stemmer so a built index matches Pagefind's query
   stems.** Pagefind stems queries at runtime with the crate `pagefind_stem`;
