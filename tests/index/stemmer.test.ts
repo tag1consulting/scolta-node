@@ -1,28 +1,18 @@
 /**
  * Stemmer tests — Parity Gate #2 (stemmer half).
  *
- * Ports tests/Index/StemmerTest.php (1:1). The basic Snowball stems below are
- * agreed across every Snowball implementation and pass with the default
- * `snowball-stemmers` backend.
+ * Ports tests/Index/StemmerTest.php (1:1) plus the full-corpus parity gate.
  *
- * ── PARITY NOTE (full-corpus gate is documented-skipped) ────────────────────
- * The committed stemmer corpus (en/fr/de/es/ru) encodes the *canonical modern*
- * Snowball variant used by the rest of the Scolta ecosystem: scolta-php
- * (wamania/php-stemmer), scolta-python (snowballstemmer 2.x), and scolta-core
- * (rust-stemmers / the shipped WASM) all agree, e.g. English `added` -> `add`,
- * Russian folds ё->е, German strips `-et`. The committed index goldens (Gate #3)
- * are built from those stems.
+ * The corpus (en/fr/de/es/ru) is the Pagefind query-stemmer oracle: the output
+ * of `pagefind_stem` 1.0.0, the crate Pagefind 1.5.0 stems queries with at
+ * runtime (modern Snowball — `added` -> `add`, `organic` -> `organic`). The
+ * default backend is that exact crate compiled to WASM, so this gate asserts
+ * byte-exact parity rather than being skipped. See the fixtures' PROVENANCE.md.
  *
- * Every readily-available JS/native Snowball backend tested (`snowball-stemmers`
- * and `node-snowball`/libstemmer) implements an OLDER algorithm revision that
- * gives `added` -> `ad` and diverges on a minority of words in every language
- * (en 57, fr ~840-919, de 1247, es 9, ru 112 of ~177k). This is a Snowball
- * algorithm-VERSION mismatch, not a JS bug, and it is exactly the parity risk
- * the port brief flagged. The fix is to supply a canonical modern-Snowball JS
- * backend via `setStemBackend()` (vendor the Snowball-compiler JS output, or a
- * package generated from the same revision as snowballstemmer 2.x). Until then
- * the full-corpus gate is skipped rather than asserted against a known-wrong
- * backend — and Gate #3 will diverge on the affected words.
+ * (History: this gate was previously skipped because every npm Snowball package
+ * is the pre-3.0 algorithm — `added` -> `ad` — and diverges from Pagefind on a
+ * minority of words per language. Compiling Pagefind's own crate to WASM removes
+ * that gap entirely instead of chasing a matching JS port.)
  */
 
 import * as fs from "node:fs";
@@ -39,8 +29,8 @@ const corpus = path.join(
 );
 const LANGS = ["en", "fr", "de", "es", "ru"];
 
-// Documented-skipped pending a canonical modern-Snowball JS backend (see note).
-describe.skip("full corpus parity (needs canonical Snowball backend)", () => {
+// The default WASM backend is Pagefind's own crate — assert byte-exact parity.
+describe("full corpus parity (pagefind_stem WASM == Pagefind 1.5.0)", () => {
   for (const lang of LANGS) {
     it(lang, () => {
       const words = fs.readFileSync(path.join(corpus, lang, "words.txt"), "utf-8").split("\n");

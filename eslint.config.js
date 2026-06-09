@@ -3,7 +3,14 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "assets/**", "coverage/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "assets/**",
+      "coverage/**",
+      "src/index/stemmer-wasm/**", // vendored wasm-pack output (generated)
+      "tools/**", // Rust crate sources for the stemmer WASM/golden
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

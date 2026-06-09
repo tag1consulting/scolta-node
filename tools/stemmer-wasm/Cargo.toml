@@ -1,0 +1,25 @@
+# WASM build of Pagefind's own query-stemmer crate (pagefind_stem), so the
+# TypeScript binding stems identically to what Pagefind does at search time.
+# Pinned to the exact version Pagefind 1.5.0 locks. See README.md and
+# ../../tests/fixtures/stemmer-corpus/PROVENANCE.md.
+[package]
+name = "stemmer-wasm"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+# Pinned to the exact version Pagefind 1.5.0 locks (checksum 8dfa810b…). Bumping
+# this means a new Pagefind stemmer revision — regenerate fixtures + provenance.
+pagefind_stem = { version = "=1.0.0", features = [
+  "catalan", "danish", "dutch", "english", "finnish", "french", "german",
+  "italian", "norwegian", "portuguese", "romanian", "russian", "spanish", "swedish",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = true

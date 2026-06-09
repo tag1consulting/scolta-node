@@ -1,21 +1,22 @@
 /**
  * Snowball stemmer (port of `Tag1\Scolta\Index\Stemmer`).
  *
- * Stems words for 14 languages, memoized. The reference bindings (scolta-php via
- * wamania/php-stemmer, scolta-python via snowballstemmer) and scolta-core (Rust
- * rust-stemmers / the WASM) all agree on a single canonical Snowball variant —
- * e.g. English `added` -> `add`. The committed stemmer corpus encodes that
- * variant, and the on-disk index format parity (Gate #3) depends on it.
+ * Stems words for 14 languages, memoized. The build-time stems must match what
+ * Pagefind stems *queries* with at runtime, or an index silently misses those
+ * queries. Pagefind 1.5.0's bundled WASM is the crate `pagefind_stem` 1.0.0
+ * (published 2026-03-23, after the Snowball 3.0 / 2024 revision), so it emits
+ * the *modern* Porter2 stems — `added` -> `add`, `organic` -> `organic`,
+ * `geologist` -> `geolog`, `organize` -> `organiz`.
  *
- * The actual Snowball implementation is INJECTABLE via {@link setStemBackend}
- * so the parity-correct backend can be supplied without touching call sites.
- * See PARITY NOTE in stemmer-corpus.test.ts: the default `snowball-stemmers`
- * npm backend is an OLDER Snowball algorithm revision that diverges from the
- * canonical corpus on a minority of words across every language, so the
- * full-corpus parity gate is documented-skipped pending a canonical backend.
+ * The default backend is that exact crate compiled to WASM (`stemmer-wasm/`,
+ * built from `tools/stemmer-wasm`, pinned to `pagefind_stem =1.0.0`), so the
+ * binding reproduces Pagefind 1.5.0's output byte-for-byte across the full
+ * corpus — see `tests/fixtures/stemmer-corpus/PROVENANCE.md`. No npm Snowball
+ * package matches: they are all the pre-3.0 algorithm (`added` -> `ad`). The
+ * backend stays INJECTABLE via {@link setStemBackend} for testing/overrides.
  */
 
-import { newStemmer } from "snowball-stemmers";
+import { createRequire } from "node:module";
 
 export interface StemBackend {
   stemWord(word: string): string;
@@ -44,23 +45,39 @@ const LANGUAGE_MAP: Record<string, string> = {
 
 const CACHE_MAX_ENTRIES = 100_000;
 
-/** Default backend: the `snowball-stemmers` npm package. */
+/** The `stem(algorithm, word)` export of the vendored `pagefind_stem` WASM. */
+interface StemWasm {
+  stem(algorithm: string, word: string): string;
+}
+
+let wasm: StemWasm | null = null;
+
+/** Load the vendored WASM lazily — importing `scolta` shouldn't pay for it. */
+function loadWasm(): StemWasm {
+  if (wasm === null) {
+    const require = createRequire(import.meta.url);
+    wasm = require("./stemmer-wasm/stemmer_wasm.js") as StemWasm;
+  }
+  return wasm;
+}
+
+/** Default backend: Pagefind's own `pagefind_stem` 1.0.0 crate, compiled to WASM. */
 function defaultBackendFactory(algorithm: string): StemBackend | null {
-  const s = newStemmer(algorithm);
-  return { stemWord: (word: string) => s.stem(word) };
+  const w = loadWasm();
+  return { stemWord: (word: string) => w.stem(algorithm, word) };
 }
 
 let backendFactory: StemBackendFactory = defaultBackendFactory;
 
 /**
- * Override the Snowball backend (e.g. a canonical modern-Snowball JS port).
- * Affects Stemmer instances created after the call.
+ * Override the Snowball backend. Affects Stemmer instances created after the
+ * call. Intended for tests; the default WASM backend is the parity-correct one.
  */
 export function setStemBackend(factory: StemBackendFactory): void {
   backendFactory = factory;
 }
 
-/** Reset to the default `snowball-stemmers` backend. */
+/** Reset to the default `pagefind_stem` WASM backend. */
 export function resetStemBackend(): void {
   backendFactory = defaultBackendFactory;
 }
