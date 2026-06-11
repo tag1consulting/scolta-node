@@ -178,11 +178,27 @@ export class BuildState {
     return Number(manifest?.["pages_processed"] ?? 0);
   }
 
-  /** Remove transient build files (not subdirectories — the cache subdir survives). */
+  /**
+   * Remove transient build files (lock, manifest, chunk data, and their .tmp
+   * leftovers) — never subdirectories, and never files the build does not own.
+   *
+   * Deliberate deviation from the PHP reference, which deletes every file in
+   * the state dir: in PHP the Amazee credentials live in CMS config (CMI, WP
+   * options, DB rows), but this stack's FilesystemConfigStorage keeps
+   * `amazee-credentials.json` at the state-dir root — the delete-every-file
+   * sweep wiped it on every fresh build, so the next AI call re-provisioned a
+   * new trial key, churning trial accounts and re-widening the expiry
+   * exposure window the key-expiry recovery exists to close.
+   */
   cleanup(): void {
     if (!fs.existsSync(this.stateDir) || !fs.statSync(this.stateDir).isDirectory()) return;
+    const ownsFile = (name: string): boolean =>
+      name === LOCK_FILE ||
+      name === MANIFEST_FILE ||
+      name === MANIFEST_FILE + ".tmp" ||
+      /^chunk-\d+\.dat(\.tmp)?$/.test(name);
     for (const entry of fs.readdirSync(this.stateDir, { withFileTypes: true })) {
-      if (entry.isFile()) {
+      if (entry.isFile() && ownsFile(entry.name)) {
         this.unlinkQuietly(path.join(this.stateDir, entry.name));
       }
     }

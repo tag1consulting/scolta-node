@@ -41,13 +41,35 @@ export class BudgetAwareProviderDecorator {
     return this.client;
   }
 
-  private static rethrowIfBudgetExceeded(exc: unknown): void {
+  /**
+   * Whether an error (anywhere in its `cause` chain) is an Amazee
+   * budget-exhaustion error — by message or by exception type.
+   *
+   * Port of the PHP `BudgetAwareProviderDecorator::isBudgetError()` helper:
+   * the single classification API for budget errors, used by the decorator's
+   * own rethrow path, {@link AmazeeAiService}, and {@link KeyExpiryRecovery}
+   * (which must exclude budget errors from auth-failure recovery).
+   */
+  static isBudgetError(exc: unknown): boolean {
     let cause: unknown = exc;
     while (cause !== null && cause !== undefined) {
+      if (cause instanceof AmazeeBudgetExceededException) {
+        return true;
+      }
       if (cause instanceof Error && cause.message.includes(BUDGET_MESSAGE)) {
-        throw new AmazeeBudgetExceededException(exc);
+        return true;
       }
       cause = cause instanceof Error ? cause.cause : null;
+    }
+    return false;
+  }
+
+  private static rethrowIfBudgetExceeded(exc: unknown): void {
+    if (exc instanceof AmazeeBudgetExceededException) {
+      return;
+    }
+    if (BudgetAwareProviderDecorator.isBudgetError(exc)) {
+      throw new AmazeeBudgetExceededException(exc);
     }
   }
 }
