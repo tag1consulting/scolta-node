@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- **`BuildState.cleanup()` no longer deletes files the build does not own —
+  in particular `amazee-credentials.json` (`src/index/build-state.ts`).** The
+  fresh-build cleanup deleted every regular file at the state-dir root, and
+  `FilesystemConfigStorage` keeps the provisioned Amazee credentials exactly
+  there: every index rebuild silently de-provisioned AI, so the next call
+  re-provisioned a new trial key — churning trial accounts and re-widening
+  the expiry exposure window the key-expiry recovery below exists to close
+  (this affects scolta-next and scolta-nuxt identically, since both pass the
+  same `stateDir` to the orchestrator and the storage). `cleanup()` now
+  removes only the build's own transients (`lock`, `manifest.json`,
+  `chunk-NNN.dat`, and their `.tmp` leftovers). This is a deliberate
+  deviation from the PHP reference's delete-every-file sweep: in PHP the
+  Amazee credentials live in CMS config (CMI, WP options, DB rows), never as
+  files in the state dir, so the sweep was harmless there. Tests pin the
+  ownership rule: own transients removed, the credentials file and foreign
+  files/subdirectories spared.
 - **Health no longer reports a working Amazee-provisioned install as
   degraded, and "configured" no longer implies "usable" (`src/health.ts`).**
   `HealthChecker` checked only the explicit `ai_api_key`, but auto-provisioned
