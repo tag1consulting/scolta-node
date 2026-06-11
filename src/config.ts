@@ -168,6 +168,9 @@ export const FIELD_KINDS: Record<string, FieldKind> = {
   preset: "string",
 };
 
+/** Numeric fields already warned about, so a bad value logs once per process. */
+const warnedInvalidNumbers = new Set<string>();
+
 export class ScoltaConfig {
   // -- AI provider --
   ai_provider = "anthropic";
@@ -287,7 +290,20 @@ export class ScoltaConfig {
       if (key === "expansion_per_term_top_k") continue;
       if (value === null || value === undefined) continue;
       if (!valid.has(key)) continue;
-      (config as unknown as Record<string, unknown>)[key] = ScoltaConfig.coerce(key, value);
+      const coerced = ScoltaConfig.coerce(key, value);
+      // A non-numeric string coerced to NaN would flow into
+      // `window.scolta.scoring` and silently break browser ranking. Keep the
+      // effective default (base or preset) and warn once per field instead.
+      if (typeof coerced === "number" && Number.isNaN(coerced)) {
+        if (!warnedInvalidNumbers.has(key)) {
+          warnedInvalidNumbers.add(key);
+          console.warn(
+            `Scolta config: ignoring non-numeric value ${JSON.stringify(value)} for "${key}"; keeping the default.`,
+          );
+        }
+        continue;
+      }
+      (config as unknown as Record<string, unknown>)[key] = coerced;
     }
 
     return config;

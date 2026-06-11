@@ -4,7 +4,7 @@
  * Config/ScoltaConfig.php).
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ScoltaConfig } from "../src/config.js";
 
 describe("ScoltaConfig", () => {
@@ -111,5 +111,35 @@ describe("ScoltaConfig", () => {
     expect("base_url" in c.toAiClientConfig()).toBe(false);
     const c2 = ScoltaConfig.fromObject({ ai_base_url: "https://x/v1" });
     expect(c2.toAiClientConfig()["base_url"]).toBe("https://x/v1");
+  });
+
+  it("non-numeric float value keeps the base default and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const c = ScoltaConfig.fromObject({ title_match_boost: "high" });
+      expect(c.title_match_boost).toBe(2.0);
+      expect(c.toJsScoringConfig()["TITLE_MATCH_BOOST"]).toBe(2.0);
+      expect(warn).toHaveBeenCalledTimes(1);
+      ScoltaConfig.fromObject({ title_match_boost: "high" });
+      expect(warn).toHaveBeenCalledTimes(1); // once per field per process
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("non-numeric int value keeps the preset value", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const c = ScoltaConfig.fromObject({ preset: "blog", results_per_page: "lots" });
+      expect(c.results_per_page).toBe(10); // blog preset survives the junk override
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("numeric strings still coerce", () => {
+    const c = ScoltaConfig.fromObject({ title_match_boost: "2.5", results_per_page: "12.9" });
+    expect(c.title_match_boost).toBe(2.5);
+    expect(c.results_per_page).toBe(12);
   });
 });
