@@ -14,7 +14,8 @@ export default defineConfig({
   // The default stemmer backend is Pagefind's pagefind_stem crate compiled to
   // WASM, loaded at runtime via a relative require. Ship the vendored module
   // next to the bundle so that require resolves in the published package.
-  onSuccess: async () => {
+  onSuccess: () => {
     cpSync("src/index/stemmer-wasm", "dist/stemmer-wasm", { recursive: true });
+    return Promise.resolve();
   },
 });

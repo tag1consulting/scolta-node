@@ -25,8 +25,8 @@ export class BuildCoordinator {
       const manifest: Manifest = {
         total_pages: intent.totalPages ?? 0,
         chunk_size: intent.memoryBudget.chunkSize(),
-        language: (intent.sourceMeta["language"] as string) ?? "en",
-        fingerprint: (intent.sourceMeta["fingerprint"] as string) ?? "",
+        language: (intent.sourceMeta["language"]) ?? "en",
+        fingerprint: (intent.sourceMeta["fingerprint"]) ?? "",
         ...intent.sourceMeta,
       };
       if (!this.state.initiateBuild(manifest)) {

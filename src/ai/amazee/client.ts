@@ -31,7 +31,7 @@ export class AmazeeClient {
     const creds = (body["key"] && typeof body["key"] === "object" ? body["key"] : body) as JsonObject;
     const token = creds["litellm_token"];
     const apiUrl = creds["litellm_api_url"];
-    const region = typeof creds["region"] === "string" ? (creds["region"] as string) : "default";
+    const region = typeof creds["region"] === "string" ? (creds["region"]) : "default";
     if (typeof token !== "string" || token === "" || typeof apiUrl !== "string" || apiUrl === "") {
       throw new AmazeeApiException(
         "Amazee.ai trial provisioning response missing litellm_token or litellm_api_url.",
@@ -62,17 +62,17 @@ export class AmazeeClient {
   async listRegions(sessionToken: string): Promise<unknown[]> {
     const body = await this.get("/regions", sessionToken);
     if (Array.isArray(body)) {
-      return body;
+      return body as unknown[];
     }
     const regions = body["regions"];
-    return Array.isArray(regions) ? regions : [];
+    return Array.isArray(regions) ? (regions as unknown[]) : [];
   }
 
   async createPrivateKey(sessionToken: string, regionId: string): Promise<UpgradeResult> {
     const body = await this.post("/private-ai-keys", { region_id: regionId }, sessionToken);
     const token = body["litellm_token"];
     const apiUrl = body["litellm_api_url"];
-    const region = typeof body["region"] === "string" ? (body["region"] as string) : regionId;
+    const region = typeof body["region"] === "string" ? (body["region"]) : regionId;
     if (typeof token !== "string" || token === "" || typeof apiUrl !== "string" || apiUrl === "") {
       throw new AmazeeApiException(
         "Amazee.ai private key creation response missing litellm_token or litellm_api_url.",
@@ -94,7 +94,7 @@ export class AmazeeClient {
       }
       const body = (await response.json()) as JsonObject;
       const data = body["data"];
-      return Array.isArray(data) ? data : [];
+      return Array.isArray(data) ? (data as unknown[]) : [];
     } catch {
       return [];
     }
@@ -162,6 +162,21 @@ export class AmazeeClient {
     return AmazeeClient.decode(path, response);
   }
 
+  /**
+   * Render an error-payload field for the exception message: strings pass
+   * through, other truthy values are JSON-encoded (the control plane sends
+   * validation errors as arrays/objects), falsy values yield null.
+   */
+  private static errorDetail(value: unknown): string | null {
+    if (typeof value === "string") {
+      return value !== "" ? value : null;
+    }
+    if (value === undefined || value === null || value === false || value === 0) {
+      return null;
+    }
+    return JSON.stringify(value);
+  }
+
   private static async decode(path: string, response: Response): Promise<JsonObject> {
     const status = response.status;
     const text = await response.text();
@@ -169,10 +184,10 @@ export class AmazeeClient {
       let message = `Amazee.ai API returned HTTP ${status} for ${path}.`;
       try {
         const data = JSON.parse(text) as JsonObject;
-        if (data && typeof data === "object" && data["detail"]) {
-          message += " " + String(data["detail"]);
-        } else if (data && typeof data === "object" && data["message"]) {
-          message += " " + String(data["message"]);
+        const detail =
+          AmazeeClient.errorDetail(data["detail"]) ?? AmazeeClient.errorDetail(data["message"]);
+        if (data && typeof data === "object" && detail !== null) {
+          message += " " + detail;
         }
       } catch {
         // body was not JSON — keep the status-only message
