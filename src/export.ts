@@ -60,6 +60,23 @@ export class ContentExporter {
     return p + "/index.html";
   }
 
+  /**
+   * Resolve `relativePath` against the output directory and require the
+   * result to stay inside it. Item URLs and ids can carry `../` segments
+   * (they may originate from remote data, e.g. a JSON:API source), so every
+   * filesystem path derived from them must be contained before use.
+   *
+   * Returns the resolved absolute path, or `null` when it escapes.
+   */
+  private containedPath(relativePath: string): string | null {
+    const base = path.resolve(this.outputDir);
+    const resolved = path.resolve(base, relativePath);
+    if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+      return null;
+    }
+    return resolved;
+  }
+
   /** Remove all files in the output directory and ensure it exists. */
   prepareOutputDir(): void {
     if (fs.existsSync(this.outputDir) && fs.statSync(this.outputDir).isDirectory()) {
@@ -105,7 +122,13 @@ export class ContentExporter {
     }
     this.exportedPaths[relativePath] = item.id;
 
-    const exportPath = path.join(this.outputDir, relativePath);
+    const exportPath = this.containedPath(relativePath);
+    if (exportPath === null) {
+      throw new Error(
+        `Refusing to export outside the output directory: item "${item.id}" ` +
+          `(URL: "${item.url}") maps to "${relativePath}"`,
+      );
+    }
     fs.mkdirSync(path.dirname(exportPath), { recursive: true, mode: 0o755 });
     fs.writeFileSync(exportPath, doc, "utf-8");
     this.exported += 1;
@@ -152,8 +175,8 @@ export class ContentExporter {
 
   deleteByUrl(url: string): boolean {
     const relativePath = ContentExporter.urlToExportPath(url);
-    const fullPath = path.join(this.outputDir, relativePath);
-    if (fs.existsSync(fullPath)) {
+    const fullPath = this.containedPath(relativePath);
+    if (fullPath !== null && fs.existsSync(fullPath)) {
       fs.unlinkSync(fullPath);
       delete this.exportedPaths[relativePath];
       return true;
@@ -164,14 +187,14 @@ export class ContentExporter {
   deleteById(id: string): boolean {
     const manifest = ContentExporter.readManifest(this.outputDir);
     if (id in manifest) {
-      const fullPath = path.join(this.outputDir, manifest[id]!);
-      if (fs.existsSync(fullPath)) {
+      const fullPath = this.containedPath(manifest[id]!);
+      if (fullPath !== null && fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath);
         return true;
       }
     }
-    const flatPath = path.join(this.outputDir, id + ".html");
-    if (fs.existsSync(flatPath)) {
+    const flatPath = this.containedPath(id + ".html");
+    if (flatPath !== null && fs.existsSync(flatPath)) {
       fs.unlinkSync(flatPath);
       return true;
     }

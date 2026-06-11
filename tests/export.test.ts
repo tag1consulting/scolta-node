@@ -114,3 +114,64 @@ describe("ContentExporter", () => {
     expect(fs.statSync(d).isDirectory()).toBe(true);
   });
 });
+
+describe("ContentExporter path containment", () => {
+  // URLs and ids may originate from remote data (e.g. a JSON:API source), so
+  // a `../` payload must never write or delete outside the output directory.
+  let outsideDir: string;
+  let exp: ContentExporter;
+
+  beforeEach(() => {
+    outsideDir = path.join(tmp, "outside");
+    fs.mkdirSync(outsideDir);
+    const out = path.join(tmp, "out");
+    fs.mkdirSync(out);
+    exp = new ContentExporter(out);
+    exp.prepareOutputDir();
+  });
+
+  it("export rejects a traversal URL", () => {
+    expect(() => exp.export(item({ url: "/../outside/evil" }))).toThrow(
+      /Refusing to export outside/,
+    );
+    expect(fs.existsSync(path.join(outsideDir, "evil", "index.html"))).toBe(false);
+  });
+
+  it("export rejects a deeply nested traversal URL", () => {
+    expect(() => exp.export(item({ url: "/a/../../../outside/evil" }))).toThrow(
+      /Refusing to export outside/,
+    );
+    expect(fs.existsSync(path.join(outsideDir, "evil", "index.html"))).toBe(false);
+  });
+
+  it("deleteByUrl refuses to unlink outside the output dir", () => {
+    const victim = path.join(outsideDir, "victim", "index.html");
+    fs.mkdirSync(path.dirname(victim), { recursive: true });
+    fs.writeFileSync(victim, "keep me");
+    expect(exp.deleteByUrl("/../outside/victim")).toBe(false);
+    expect(fs.existsSync(victim)).toBe(true);
+  });
+
+  it("deleteById refuses a traversal id", () => {
+    const victim = path.join(outsideDir, "victim.html");
+    fs.writeFileSync(victim, "keep me");
+    expect(exp.deleteById("../outside/victim")).toBe(false);
+    expect(fs.existsSync(victim)).toBe(true);
+  });
+
+  it("deleteById refuses a traversal path from a tampered manifest", () => {
+    const victim = path.join(outsideDir, "victim.html");
+    fs.writeFileSync(victim, "keep me");
+    fs.writeFileSync(
+      path.join(exp.outputDir, ".scolta-export-manifest.json"),
+      JSON.stringify({ evil: "../outside/victim.html" }),
+    );
+    expect(exp.deleteById("evil")).toBe(false);
+    expect(fs.existsSync(victim)).toBe(true);
+  });
+
+  it("normal export and delete still work under containment", () => {
+    expect(exp.export(item({ url: "/recipe/cake" }))).toBe(true);
+    expect(exp.deleteByUrl("/recipe/cake")).toBe(true);
+  });
+});
