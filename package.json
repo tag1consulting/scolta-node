@@ -64,7 +64,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.adapter.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
