@@ -18,8 +18,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { Stemmer } from "../../src/index/stemmer.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { __setWasmModulePathForTesting, Stemmer } from "../../src/index/stemmer.js";
 
 const corpus = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -96,5 +96,33 @@ describe("Stemmer (basic)", () => {
     expect(langs).toContain("fr");
     expect(langs).toContain("ca");
     expect(langs.length).toBe(14);
+  });
+});
+
+describe("WASM load failure", () => {
+  afterEach(() => {
+    __setWasmModulePathForTesting("./stemmer-wasm/stemmer_wasm.js");
+  });
+
+  it("falls back to identity stemming and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      __setWasmModulePathForTesting("./stemmer-wasm/does-not-exist.js");
+      const s = new Stemmer("en");
+      expect(s.stem("running")).toBe("running");
+      expect(s.stem("added")).toBe("added");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toContain("identity stemming");
+      // A second Stemmer doesn't retry the load or warn again.
+      expect(new Stemmer("fr").stem("mangées")).toBe("mangées");
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("recovers once the module path is valid again", () => {
+    __setWasmModulePathForTesting("./stemmer-wasm/stemmer_wasm.js");
+    expect(new Stemmer("en").stem("running")).toBe("run");
   });
 });
