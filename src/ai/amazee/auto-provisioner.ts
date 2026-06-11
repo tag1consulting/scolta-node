@@ -28,6 +28,13 @@ export class AutoProvisioner {
    * Provision a free trial unless AI is already configured. Idempotent — a
    * no-op when an explicit key exists or credentials are already stored.
    * Returns true only on a successful first provisioning.
+   *
+   * The stored-credentials no-op deliberately does NOT validate that the
+   * stored key still works — trial keys are revoked server-side when the
+   * trial ends, and that expiry is not announced at provisioning time, so a
+   * cheap lazy-init guard cannot know. Call-time auth failures are the
+   * reliable signal: {@link KeyExpiryRecovery} detects them and recovers
+   * through {@link reprovision}, which bypasses this no-op.
    */
   static async ensureAiAvailable(storage: ConfigStorage, opts: EnsureAiOptions = {}): Promise<boolean> {
     if (opts.hasExplicitApiKey) {
@@ -58,5 +65,28 @@ export class AutoProvisioner {
       opts.onModelsResolved(result.aiModel ?? "", result.aiExpansionModel ?? "");
     }
     return true;
+  }
+
+  /**
+   * Replace stored (known-bad) credentials with a freshly provisioned trial.
+   *
+   * The expired-key recovery entry point: unlike {@link ensureAiAvailable},
+   * stored credentials do not short-circuit — they are cleared first, then a
+   * fresh trial is provisioned and stored through the same provisioner path.
+   * Callers are responsible for rate-limiting (see {@link KeyExpiryRecovery},
+   * which guards this behind a one-attempt-per-window marker).
+   *
+   * Provisioning failures are caught internally and returned as `false`; the
+   * old credentials are already cleared at that point, which is correct —
+   * they were known-bad, and an empty store lets `ensureAiAvailable()` retry
+   * on the next lazy-init pass.
+   */
+  static async reprovision(
+    storage: ConfigStorage,
+    opts: Omit<EnsureAiOptions, "hasExplicitApiKey"> = {},
+  ): Promise<boolean> {
+    storage.clear();
+
+    return AutoProvisioner.ensureAiAvailable(storage, { ...opts, hasExplicitApiKey: false });
   }
 }

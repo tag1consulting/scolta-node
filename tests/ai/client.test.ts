@@ -129,6 +129,29 @@ describe("AiClient", () => {
     await expect(c.message("s", "u")).rejects.toThrow();
   });
 
+  it("non-401 errors preserve the response body for failure classification", async () => {
+    // The LiteLLM proxy announces auth-class failures in the body of a 400
+    // (e.g. an expired Amazee trial key); KeyExpiryRecovery classifies them
+    // by message marker, so the message must carry the body — matching the
+    // PHP client, whose Guzzle messages include a response summary.
+    const { client: c } = client({ api_key: "k" }, () => ({
+      status: 400,
+      json: { error: { message: "Authentication Error - Expired Key. Key Expired. code: expired_key" } },
+    }));
+    await expect(c.message("s", "u")).rejects.toThrow(/HTTP 400.*expired_key/);
+  });
+
+  it("non-401 error body is truncated to 500 characters", async () => {
+    const { client: c } = client({ api_key: "k" }, () => ({ status: 502, body: "x".repeat(2000) }));
+    try {
+      await c.message("s", "u");
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect((e as Error).message.length).toBeLessThan(600);
+      expect((e as Error).message).toContain("HTTP 502");
+    }
+  });
+
   it("malformed JSON raises error", async () => {
     const { client: c } = client({ api_key: "k" }, () => ({ body: "not json" }));
     await expect(c.message("s", "u")).rejects.toThrow(/malformed JSON/);

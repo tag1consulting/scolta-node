@@ -11,6 +11,7 @@ export { AutoProvisioner, type EnsureAiOptions } from "./auto-provisioner.js";
 export { BudgetAwareProviderDecorator, BUDGET_MESSAGE } from "./budget-decorator.js";
 export { AmazeeClient, DEFAULT_BASE_URL } from "./client.js";
 export { AmazeeApiException, AmazeeBudgetExceededException } from "./exceptions.js";
+export { KeyExpiryRecovery, type KeyExpiryRecoveryOptions } from "./key-expiry-recovery.js";
 export { AmazeeModelResolver, type ResolvedModels } from "./model-resolver.js";
 export {
   ProvisioningResult,

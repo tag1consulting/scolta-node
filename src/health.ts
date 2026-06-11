@@ -10,6 +10,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { KeyExpiryRecovery } from "./ai/amazee/key-expiry-recovery.js";
+import type { ConfigStorage } from "./ai/amazee/storage.js";
+import type { CacheDriver } from "./cache.js";
 import type { ScoltaConfig } from "./config.js";
 import { PagefindNodeApi, type PagefindStatus } from "./index/pagefind.js";
 
@@ -19,7 +22,12 @@ const STALE_URL = /^\/[a-zA-Z0-9_-]+\.html$/;
 export interface HealthReport {
   status: "ok" | "degraded";
   aiProvider: string;
+  /** Credentials are present: an explicit key OR stored Amazee credentials. */
   aiConfigured: boolean;
+  /** Configured AND not known to be expired/auth-failing. */
+  aiUsable: boolean;
+  /** A recorded call-time auth failure marks the stored credentials as bad. */
+  aiAuthFailing: boolean;
   pagefindAvailable: boolean;
   wasmAvailable: boolean;
   indexExists: boolean;
@@ -32,22 +40,53 @@ export interface HealthReport {
 }
 
 export class HealthChecker {
+  /**
+   * @param amazeeStorage Optional Amazee credential store (the same instance
+   *   the AmazeeAiService uses). When provided, auto-provisioned installs —
+   *   which have no explicit `ai_api_key` — count as AI-configured instead of
+   *   reporting "degraded" forever while AI works fine.
+   * @param cache Optional cache used to read the {@link KeyExpiryRecovery}
+   *   auth-failure marker. When provided, `aiUsable` reflects whether the
+   *   stored credentials actually authenticate (a marker recorded at call
+   *   time — never a live API call per health request). When null, `aiUsable`
+   *   mirrors `aiConfigured`.
+   */
   constructor(
     private readonly config: ScoltaConfig,
     private readonly indexOutputDir: string,
     private readonly binary: { status(): Promise<PagefindStatus> } = new PagefindNodeApi(),
+    private readonly amazeeStorage: ConfigStorage | null = null,
+    private readonly cache: CacheDriver | null = null,
   ) {}
 
+  /**
+   * Run all health checks and return a structured report.
+   *
+   * `aiConfigured` states that credentials are present — an explicit key or
+   * stored Amazee-provisioned credentials (the explicit-key-only check was
+   * the inverse of the php/python expired-key lie: a happily auto-provisioned
+   * install reported "degraded" forever). `aiUsable` additionally requires
+   * that the credentials are not known to be expired/auth-failing.
+   */
   async check(): Promise<HealthReport> {
     const binaryStatus = await this.binary.status();
 
     const indexExists =
       fs.existsSync(path.join(this.indexOutputDir, "pagefind", "pagefind.js")) ||
       fs.existsSync(path.join(this.indexOutputDir, "pagefind.js"));
-    const aiConfigured = this.config.ai_api_key.trim() !== "";
+    const explicitKey = this.config.ai_api_key.trim() !== "";
+    const amazeeProvisioned = this.amazeeStorage !== null && this.amazeeStorage.load() !== null;
+    const aiConfigured = explicitKey || amazeeProvisioned;
+
+    // "Configured" must not imply "usable": stored credentials can be
+    // expired/revoked server-side. KeyExpiryRecovery records auth failures in
+    // the cache at call time; reading that marker here keeps health truthful
+    // without adding a live API call per health request.
+    const aiAuthFailing = this.cache !== null && KeyExpiryRecovery.isAuthFailingIn(this.cache);
+    const aiUsable = aiConfigured && !aiAuthFailing;
 
     let status: "ok" | "degraded" = "ok";
-    if (!indexExists || !aiConfigured) status = "degraded";
+    if (!indexExists || !aiUsable) status = "degraded";
 
     const configuredIndexer = this.config.indexer || "auto";
     const indexerActive: "ts" | "binary" =
@@ -64,6 +103,8 @@ export class HealthChecker {
       status,
       aiProvider: this.config.ai_provider || "anthropic",
       aiConfigured,
+      aiUsable,
+      aiAuthFailing,
       pagefindAvailable: binaryStatus.available,
       wasmAvailable: false,
       indexExists,

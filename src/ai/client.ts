@@ -186,7 +186,18 @@ export class AiClient {
         const retryAfter = response.headers.get("Retry-After") || null;
         throw new RateLimitError("Scolta AI API rate limit reached.", retryAfter);
       }
-      throw new Error(`Scolta AI API request failed: HTTP ${status}`);
+      // Include a truncated body snippet, mirroring the PHP client (Guzzle
+      // exception messages carry a response summary). The body is the only
+      // place the LiteLLM proxy announces auth-class failures on non-401
+      // statuses (e.g. HTTP 400 `expired_key` for a revoked Amazee trial
+      // key), which KeyExpiryRecovery classifies by message marker.
+      let detail = "";
+      try {
+        detail = (await response.text()).trim().slice(0, 500);
+      } catch {
+        // Body unreadable — fall back to the status-only message.
+      }
+      throw new Error(`Scolta AI API request failed: HTTP ${status}${detail !== "" ? ` ${detail}` : ""}`);
     }
     return response;
   }

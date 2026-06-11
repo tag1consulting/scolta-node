@@ -12,9 +12,10 @@
 import type { ScoltaConfig } from "../config.js";
 import { AiClient, type ChatMessage } from "./client.js";
 import { AutoProvisioner } from "./amazee/auto-provisioner.js";
-import { BUDGET_MESSAGE } from "./amazee/budget-decorator.js";
+import { BudgetAwareProviderDecorator } from "./amazee/budget-decorator.js";
 import { AmazeeBudgetExceededException } from "./amazee/exceptions.js";
 import type { AmazeeClient } from "./amazee/client.js";
+import type { KeyExpiryRecovery } from "./amazee/key-expiry-recovery.js";
 import type { ConfigStorage } from "./amazee/storage.js";
 import { AiServiceAdapter } from "./service.js";
 
@@ -27,11 +28,30 @@ export class AmazeeAiService extends AiServiceAdapter {
   private readonly storage: ConfigStorage;
   private readonly amazeeClient?: AmazeeClient;
   private clientPromise: Promise<AiClient> | null = null;
+  private keyRecovery: KeyExpiryRecovery | null = null;
 
   constructor(config: ScoltaConfig, storage: ConfigStorage, deps: AmazeeAiServiceDeps = {}) {
     super(config);
     this.storage = storage;
     this.amazeeClient = deps.amazeeClient;
+  }
+
+  /**
+   * Wire Amazee key-expiry recovery into the AI call path.
+   *
+   * When set, an auth-class failure (expired/revoked trial key) on any AI
+   * call triggers a one-shot re-provision through the recovery's guarded path
+   * and, on success, a single retry with a client rebuilt from the fresh
+   * credentials. Without it, behavior is unchanged: the failure propagates.
+   *
+   * Port of the PHP `AiServiceAdapter::setKeyExpiryRecovery()` — it lives on
+   * this class rather than the base adapter because in this binding the
+   * auto-provisioned path (Amazee storage and all) IS this class; recovery
+   * never applies to the explicit-key path, which {@link recoverFromAuthFailure}
+   * also guards against directly.
+   */
+  setKeyExpiryRecovery(recovery: KeyExpiryRecovery): void {
+    this.keyRecovery = recovery;
   }
 
   // -- public AI calls (override to await provisioning) ---------------------
@@ -42,6 +62,10 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.message(systemPrompt, userMessage, maxTokens);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
+      if (await this.recoverFromAuthFailure(exc)) {
+        const client = await this.resolveClient();
+        return await client.message(systemPrompt, userMessage, maxTokens);
+      }
       throw exc;
     }
   }
@@ -52,6 +76,10 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.conversation(systemPrompt, messages, maxTokens);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
+      if (await this.recoverFromAuthFailure(exc)) {
+        const client = await this.resolveClient();
+        return await client.conversation(systemPrompt, messages, maxTokens);
+      }
       throw exc;
     }
   }
@@ -68,8 +96,50 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.message(systemPrompt, userMessage, maxTokens, model);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
+      if (await this.recoverFromAuthFailure(exc)) {
+        const client = await this.resolveClient();
+        // Recompute: re-provisioning may have resolved fresh model names.
+        const model = operation === "expand_query" ? this.expansionModel() : undefined;
+        return await client.message(systemPrompt, userMessage, maxTokens, model);
+      }
       throw exc;
     }
+  }
+
+  // -- key-expiry recovery ----------------------------------------------------
+
+  /**
+   * Attempt expired-key recovery and arrange a fresh client for one retry.
+   *
+   * Returns true only when recovery is wired, this service is on the
+   * auto-provisioned path (no explicit key — an explicit key failing auth is
+   * the user's key to fix, not Amazee's to replace), the failure is
+   * auth-class (never budget-exhaustion — {@link KeyExpiryRecovery} excludes
+   * it), the guarded re-provision succeeded, and fresh credentials are in
+   * storage. The caller then retries the original request exactly once; a
+   * failure of that retry propagates normally (the recovery's window guard
+   * prevents another re-provision attempt).
+   */
+  private async recoverFromAuthFailure(exc: unknown): Promise<boolean> {
+    if (this.keyRecovery === null) {
+      return false;
+    }
+    if (this.getConfig().ai_api_key) {
+      return false;
+    }
+
+    const recovered = await this.keyRecovery.handleAuthFailure(exc, (aiModel, aiExpansionModel) =>
+      this.storage.storeModels(aiModel, aiExpansionModel),
+    );
+    if (!recovered || this.storage.load() === null) {
+      return false;
+    }
+
+    // Drop the cached client so the retry resolves one built from the
+    // freshly stored credentials.
+    this.clientPromise = null;
+
+    return true;
   }
 
   // -- client resolution ----------------------------------------------------
@@ -133,12 +203,8 @@ export class AmazeeAiService extends AiServiceAdapter {
     if (exc instanceof AmazeeBudgetExceededException) {
       throw exc;
     }
-    let cause: unknown = exc;
-    while (cause !== null && cause !== undefined) {
-      if (cause instanceof Error && cause.message.includes(BUDGET_MESSAGE)) {
-        throw new AmazeeBudgetExceededException(exc);
-      }
-      cause = cause instanceof Error ? cause.cause : null;
+    if (BudgetAwareProviderDecorator.isBudgetError(exc)) {
+      throw new AmazeeBudgetExceededException(exc);
     }
   }
 }
