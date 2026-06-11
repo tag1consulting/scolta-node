@@ -26,6 +26,13 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "adapter": [
+        "./dist/adapter.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "import": {
@@ -35,6 +42,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./adapter": {
+      "import": {
+        "types": "./dist/adapter.d.ts",
+        "default": "./dist/adapter.js"
+      },
+      "require": {
+        "types": "./dist/adapter.d.cts",
+        "default": "./dist/adapter.cjs"
       }
     },
     "./package.json": "./package.json"
