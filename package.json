@@ -5,6 +5,13 @@
   "license": "MIT",
   "author": "Tag1 Consulting <info@tag1.com>",
   "homepage": "https://tag1.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tag1consulting/scolta-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tag1consulting/scolta-node/issues"
+  },
   "keywords": [
     "search",
     "ai",
@@ -21,9 +28,14 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
@@ -39,7 +51,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:publish": "publint && attw --pack ."
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0",
@@ -57,10 +70,12 @@
     }
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.3",
     "@eslint/js": "^9.0.0",
     "@types/node": "^20.11.0",
     "@types/proper-lockfile": "^4.1.4",
     "eslint": "^9.0.0",
+    "publint": "^0.3.21",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.0.0",
