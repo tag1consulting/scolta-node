@@ -7,7 +7,7 @@
  * OpenAI-compatible `base_url` path).
  */
 
-import { ApiKeyInvalidError, ApiKeyMissingError, RateLimitError } from "../errors.js";
+import { AiTimeoutError, ApiKeyInvalidError, ApiKeyMissingError, RateLimitError } from "../errors.js";
 
 export const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 export const ANTHROPIC_API_VERSION = "2023-06-01";
@@ -29,6 +29,37 @@ export interface ChatMessage {
 
 /** Injectable fetch, matching the global `fetch` signature. */
 export type FetchLike = typeof fetch;
+
+/**
+ * Extract the response text from an Anthropic messages payload
+ * (`{content: [{text}]}`), or "" when the shape doesn't match — preserving
+ * the prior lenient behaviour without trusting the external shape.
+ */
+function extractAnthropicText(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "";
+  const content = (data as { content?: unknown }).content;
+  if (!Array.isArray(content) || content.length === 0) return "";
+  const first: unknown = content[0];
+  if (typeof first !== "object" || first === null) return "";
+  const text = (first as { text?: unknown }).text;
+  return typeof text === "string" ? text : "";
+}
+
+/**
+ * Extract the response text from an OpenAI chat-completions payload
+ * (`{choices: [{message: {content}}]}`), or "" when the shape doesn't match.
+ */
+function extractOpenaiText(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "";
+  const choices = (data as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || choices.length === 0) return "";
+  const first: unknown = choices[0];
+  if (typeof first !== "object" || first === null) return "";
+  const message = (first as { message?: unknown }).message;
+  if (typeof message !== "object" || message === null) return "";
+  const content = (message as { content?: unknown }).content;
+  return typeof content === "string" ? content : "";
+}
 
 export class AiClient {
   readonly provider: string;
@@ -128,11 +159,7 @@ export class AiClient {
       messages,
     });
     const data = await this.parseJson(response);
-    try {
-      return (data as any).content[0].text;
-    } catch {
-      return "";
-    }
+    return extractAnthropicText(data);
   }
 
   private async sendOpenai(
@@ -151,11 +178,7 @@ export class AiClient {
       messages: allMessages,
     });
     const data = await this.parseJson(response);
-    try {
-      return (data as any).choices[0].message.content;
-    } catch {
-      return "";
-    }
+    return extractOpenaiText(data);
   }
 
   private async post(
@@ -172,6 +195,14 @@ export class AiClient {
         signal: AbortSignal.timeout(this.timeout * 1000),
       });
     } catch (exc) {
+      // AbortSignal.timeout() rejects with a "TimeoutError" DOMException; an
+      // externally aborted signal rejects with "AbortError". Surface both as
+      // a typed timeout so callers can tell a slow provider from a broken one.
+      if (exc instanceof Error && (exc.name === "TimeoutError" || exc.name === "AbortError")) {
+        throw new AiTimeoutError(
+          `Scolta AI API request timed out after ${this.timeout}s: ${String(exc)}`,
+        );
+      }
       throw new Error(`Scolta AI API request failed: ${String(exc)}`, { cause: exc });
     }
 

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { AiClient, type AiClientConfig } from "../../src/ai/client.js";
-import { ApiKeyInvalidError, ApiKeyMissingError, RateLimitError } from "../../src/errors.js";
+import { AiTimeoutError, ApiKeyInvalidError, ApiKeyMissingError, RateLimitError } from "../../src/errors.js";
 
 interface Captured {
   url?: string;
@@ -173,5 +173,56 @@ describe("AiClient", () => {
     ];
     await c.conversation("sys", msgs);
     expect(captured.body.messages).toEqual(msgs);
+  });
+
+  it.each([
+    ["null payload", null],
+    ["content not an array", { content: "nope" }],
+    ["empty content array", { content: [] }],
+    ["entry without text", { content: [{ type: "tool_use" }] }],
+    ["non-string text", { content: [{ text: 42 }] }],
+  ])("anthropic malformed shape returns empty string: %s", async (_name, json) => {
+    const { client: c } = client({ api_key: "k" }, () => ({ json }));
+    expect(await c.message("s", "u")).toBe("");
+  });
+
+  it.each([
+    ["choices not an array", { choices: {} }],
+    ["empty choices", { choices: [] }],
+    ["choice without message", { choices: [{}] }],
+    ["non-string content", { choices: [{ message: { content: ["x"] } }] }],
+  ])("openai malformed shape returns empty string: %s", async (_name, json) => {
+    const { client: c } = client({ provider: "openai", api_key: "k" }, () => ({ json }));
+    expect(await c.message("s", "u")).toBe("");
+  });
+
+  it("openai well-formed response returns the content", async () => {
+    const { client: c } = client({ provider: "openai", api_key: "k" }, () => ({
+      json: { choices: [{ message: { content: "answer" } }] },
+    }));
+    expect(await c.message("s", "u")).toBe("answer");
+  });
+
+  it.each([["TimeoutError"], ["AbortError"]])(
+    "fetch %s maps to AiTimeoutError",
+    async (name) => {
+      const fetchImpl: typeof fetch = async () => {
+        throw new DOMException("The operation was aborted.", name);
+      };
+      const c = new AiClient({ api_key: "k", timeout: 7 }, fetchImpl);
+      const err = await c.message("s", "u").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(AiTimeoutError);
+      expect((err as Error).message).toContain("timed out after 7s");
+    },
+  );
+
+  it("non-timeout fetch failure stays a generic error", async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const c = new AiClient({ api_key: "k" }, fetchImpl);
+    const err = await c.message("s", "u").catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(AiTimeoutError);
+    expect((err as Error).message).toContain("request failed");
   });
 });
