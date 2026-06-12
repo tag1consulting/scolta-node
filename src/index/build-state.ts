@@ -218,8 +218,8 @@ export class BuildState {
     for (const candidate of [p, p + ".tmp"]) {
       if (!fs.existsSync(candidate)) continue;
       try {
-        const data = JSON.parse(fs.readFileSync(candidate, "utf-8"));
-        if (data && typeof data === "object" && !Array.isArray(data)) return data;
+        const data: unknown = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+        if (data && typeof data === "object" && !Array.isArray(data)) return data as Manifest;
       } catch {
         continue;
       }

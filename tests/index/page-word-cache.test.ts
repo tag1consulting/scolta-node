@@ -99,7 +99,7 @@ describe("token cache efficiency", () => {
 
     const calls: string[] = [];
     buildWithCount(sd, od, edited, calls);
-    expect(calls).toEqual([edited[7]!.id]);
+    expect(calls).toEqual([edited[7].id]);
   });
 
   it("deleted page absent from index", () => {

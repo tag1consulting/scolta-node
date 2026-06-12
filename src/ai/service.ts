@@ -114,21 +114,21 @@ export class AiServiceAdapter {
   }
 
   /** Override to route through a platform AI layer; null falls back. */
-  protected async tryFrameworkAi(
+  protected tryFrameworkAi(
     _systemPrompt: string,
     _userMessage: string,
     _maxTokens: number,
   ): Promise<string | null> {
-    return null;
+    return Promise.resolve(null);
   }
 
   /** Override to route through a platform AI layer; null falls back. */
-  protected async tryFrameworkConversation(
+  protected tryFrameworkConversation(
     _systemPrompt: string,
     _messages: ChatMessage[],
     _maxTokens: number,
   ): Promise<string | null> {
-    return null;
+    return Promise.resolve(null);
   }
 
   /**

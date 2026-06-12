@@ -133,13 +133,18 @@ export class ChunkReader {
           `Delete the state directory and re-run a fresh build: ${this.path}`,
       );
     }
-    const header = JSON.parse(buf.subarray(0, nl).toString("utf-8"));
-    if (Number(header.v ?? 0) !== 2) {
+    const parsed: unknown = JSON.parse(buf.subarray(0, nl).toString("utf-8"));
+    const header =
+      parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    if (Number(header["v"] ?? 0) !== 2) {
       throw new Error(`Malformed or unsupported chunk header in: ${this.path}`);
     }
     return {
       buf,
-      header: { pageCount: Number(header.page_count ?? 0), termCount: Number(header.term_count ?? 0) },
+      header: {
+        pageCount: Number(header["page_count"] ?? 0),
+        termCount: Number(header["term_count"] ?? 0),
+      },
       bodyStart: nl + 1,
     };
   }
@@ -194,9 +199,12 @@ export class ChunkReader {
         p += 4 + len;
       }
       const footerNl = buf.indexOf(0x0a, p);
-      const footer = JSON.parse(buf.subarray(p, footerNl === -1 ? undefined : footerNl).toString("utf-8"));
+      const footer: unknown = JSON.parse(
+        buf.subarray(p, footerNl === -1 ? undefined : footerNl).toString("utf-8"),
+      );
+      if (footer === null || typeof footer !== "object") return false;
       if (!("crc32" in footer)) return true;
-      return hex8(crc) === footer.crc32;
+      return hex8(crc) === (footer as Record<string, unknown>)["crc32"];
     } catch {
       return false;
     }
@@ -218,8 +226,13 @@ export class ChunkReader {
         p += 4 + len;
       }
       const footerNl = buf.indexOf(0x0a, p);
-      const footer = JSON.parse(buf.subarray(p, footerNl === -1 ? undefined : footerNl).toString("utf-8"));
-      return "hmac" in footer && footer.hmac === ctx.digest("hex");
+      const footer: unknown = JSON.parse(
+        buf.subarray(p, footerNl === -1 ? undefined : footerNl).toString("utf-8"),
+      );
+      if (footer === null || typeof footer !== "object") return false;
+      return (
+        "hmac" in footer && (footer as Record<string, unknown>)["hmac"] === ctx.digest("hex")
+      );
     } catch {
       return false;
     }

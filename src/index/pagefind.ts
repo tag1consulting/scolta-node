@@ -24,11 +24,37 @@ export interface PagefindStatus {
   message: string;
 }
 
+/** The slice of the `pagefind` Node API this binding drives. */
+interface PagefindIndex {
+  addCustomRecord(record: {
+    url: string;
+    content: string;
+    language: string;
+    meta: Record<string, string>;
+    filters: Record<string, string[]>;
+  }): Promise<unknown>;
+  writeFiles(opts: { outputPath: string }): Promise<unknown>;
+  deleteIndex?(): Promise<unknown>;
+}
+
+interface PagefindModule {
+  createIndex(): Promise<{ index: PagefindIndex }>;
+  close?(): Promise<unknown>;
+}
+
 /** Lazily load the optional `pagefind` peer dependency. */
-async function loadPagefind(): Promise<any | null> {
+async function loadPagefind(): Promise<PagefindModule | null> {
   try {
     // Indirect import so bundlers don't hard-require the optional peer dep.
-    return await import("pagefind");
+    const mod: unknown = await import("pagefind");
+    if (
+      mod === null ||
+      typeof mod !== "object" ||
+      typeof (mod as { createIndex?: unknown }).createIndex !== "function"
+    ) {
+      return null;
+    }
+    return mod as PagefindModule;
   } catch {
     return null;
   }
@@ -38,7 +64,7 @@ export class PagefindNodeApi {
   /** Probe availability by loading the package and creating a throwaway index. */
   async isAvailable(): Promise<boolean> {
     const mod = await loadPagefind();
-    if (mod === null || typeof mod.createIndex !== "function") {
+    if (mod === null) {
       return false;
     }
     try {

@@ -51,12 +51,28 @@ interface StemWasm {
 }
 
 let wasm: StemWasm | null = null;
+let wasmLoadFailed = false;
+let wasmModulePath = "./stemmer-wasm/stemmer_wasm.js";
 
-/** Load the vendored WASM lazily — importing `scolta` shouldn't pay for it. */
-function loadWasm(): StemWasm {
-  if (wasm === null) {
-    const require = createRequire(import.meta.url);
-    wasm = require("./stemmer-wasm/stemmer_wasm.js") as StemWasm;
+/**
+ * Load the vendored WASM lazily — importing `scolta` shouldn't pay for it.
+ *
+ * Returns null (after warning once) when the vendored module is missing or
+ * corrupt: stemming then degrades to identity instead of every `stem()` call
+ * throwing the raw require error.
+ */
+function loadWasm(): StemWasm | null {
+  if (wasm === null && !wasmLoadFailed) {
+    try {
+      const require = createRequire(import.meta.url);
+      wasm = require(wasmModulePath) as StemWasm;
+    } catch (exc) {
+      wasmLoadFailed = true;
+      console.warn(
+        `Scolta: failed to load the vendored stemmer WASM (${String(exc)}); ` +
+          "falling back to identity stemming — built stems may not match Pagefind query stems.",
+      );
+    }
   }
   return wasm;
 }
@@ -64,7 +80,14 @@ function loadWasm(): StemWasm {
 /** Default backend: Pagefind's own `pagefind_stem` 1.0.0 crate, compiled to WASM. */
 function defaultBackendFactory(algorithm: string): StemBackend | null {
   const w = loadWasm();
-  return { stemWord: (word: string) => w.stem(algorithm, word) };
+  return w === null ? null : { stemWord: (word: string) => w.stem(algorithm, word) };
+}
+
+/** Test-only: repoint the WASM loader and reset its memoized state. */
+export function __setWasmModulePathForTesting(modulePath: string): void {
+  wasmModulePath = modulePath;
+  wasm = null;
+  wasmLoadFailed = false;
 }
 
 let backendFactory: StemBackendFactory = defaultBackendFactory;

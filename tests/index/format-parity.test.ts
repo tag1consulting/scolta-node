@@ -48,7 +48,7 @@ function convEntry(v: any): PageEntry {
   const positions = new Map<number, number[]>();
   if (!Array.isArray(v.positions)) {
     for (const [w, p] of Object.entries(v.positions as Record<string, number[]>)) {
-      positions.set(Number(w), (p as number[]).map(Number));
+      positions.set(Number(w), (p).map(Number));
     }
   }
   return { positions, metaPositions: (v.meta_positions as number[]).map(Number) };
@@ -65,7 +65,7 @@ function loadPhpIndex(): { index: InvertedIndex; pages: Map<number, IndexPage> }
       for (const [k, v] of Object.entries(entries)) {
         if (k === "_variants") {
           for (const [orig, pgs] of Object.entries(v as Record<string, number[]>)) {
-            ni.variants.set(orig, (pgs as number[]).map(Number));
+            ni.variants.set(orig, (pgs).map(Number));
           }
         } else {
           ni.pages.set(Number(k), convEntry(v));

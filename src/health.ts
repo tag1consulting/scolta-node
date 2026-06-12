@@ -147,9 +147,12 @@ export class HealthChecker {
       }
       if (data.subarray(0, 12).toString("latin1") === "pagefind_dcd") data = data.subarray(12);
       try {
-        const j = JSON.parse(data.toString("utf-8"));
-        if (j && typeof j === "object" && typeof j.url === "string" && STALE_URL.test(j.url)) {
-          return true;
+        const j: unknown = JSON.parse(data.toString("utf-8"));
+        if (j !== null && typeof j === "object") {
+          const url = (j as { url?: unknown }).url;
+          if (typeof url === "string" && STALE_URL.test(url)) {
+            return true;
+          }
         }
       } catch {
         continue;
@@ -174,8 +177,8 @@ export class SetupCheck {
   } = {}): Promise<SetupCheckResult[]> {
     const results: SetupCheckResult[] = [];
 
-    const major = parseInt(process.versions.node.split(".")[0]!, 10);
-    const nodeOk = major >= 20;
+    const major = Number.parseInt(process.versions.node.split(".")[0]!, 10);
+    const nodeOk = Number.isFinite(major) && major >= 20;
     results.push({
       name: "Node version",
       status: nodeOk ? "pass" : "fail",
@@ -216,7 +219,7 @@ export class SetupCheck {
   static checkIntlSegmenter(): { level: "ok" | "warning"; message: string } {
     // Node >= 20 ships full ICU, so Intl.Segmenter is always present — the
     // tokenizer parity path. Verify rather than assume.
-    if (typeof Intl !== "undefined" && typeof (Intl as any).Segmenter === "function") {
+    if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
       return { level: "ok", message: "Intl.Segmenter available (full ICU)" };
     }
     return {

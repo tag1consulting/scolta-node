@@ -60,7 +60,7 @@ export class Tokenizer {
     let lastCp = 0;
 
     for (const m of text.matchAll(WORD)) {
-      const utf16Index = m.index!;
+      const utf16Index = m.index;
       lastCp += codePointLength(text.slice(lastUtf16, utf16Index));
       lastUtf16 = utf16Index;
       const word = m[0];
