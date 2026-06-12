@@ -1,0 +1,31 @@
+name: Release
+
+# Tag push (vX.Y.Z) publishes to npm via Trusted Publishing (OIDC): no
+# long-lived token, provenance attestation generated automatically. One-time
+# setup on npmjs.com: package Settings -> Trusted Publisher -> GitHub Actions,
+# repository tag1consulting/scolta-node, workflow filename release.yml.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm >= 11.5.1; runner images may bundle older.
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      # Provenance is automatic under OIDC. Token fallback: set NODE_AUTH_TOKEN
+      # from a granular automation token secret instead of the OIDC exchange.
+      - run: npm publish

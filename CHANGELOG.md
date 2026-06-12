@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-12
+
+### Fixed
+
+- **`require("scolta")` crashed at module load — the CJS half of the dual
+  build has been unusable since 1.0.0.** Every `import.meta.url` in the CJS
+  bundle compiled to a property of an empty object (`var import_meta = {}`),
+  so the top-level assets-dir constant in `src/health.ts` ran
+  `fileURLToPath(undefined)` during `require()`. Had loading gotten further,
+  the stemmer's `createRequire(import.meta.url)` would have thrown into its
+  load guard and **silently degraded to identity stemming** (mismatching
+  Pagefind's query stems), and `pf-common`'s assets-dir walk would have thrown
+  from `copyAssets`. attw stayed green throughout because it validates
+  resolution, not runtime. Root cause: the tsup builds lacked the
+  `import.meta` shim for the CJS format; `shims: true` (both build passes) now
+  derives `import.meta.url` from `__filename`. New tests load
+  `dist/index.cjs` / `dist/adapter.cjs` through a real `require()` and assert
+  behaviour — actual stem output, actually-copied pagefind assets, a passing
+  browser-WASM SetupCheck — not absence of exceptions; 4 of 5 fail against an
+  unshimmed build.
+- **Path traversal in content export.** `ContentExporter.urlToExportPath()`
+  never rejected `..` segments and the writer plus both delete paths joined
+  the result straight onto the output dir — an item url/id carrying `../`
+  (reachable via remote content sources, e.g. a JSON:API mapping) could write
+  or unlink files outside the export tree. Every derived path is resolved and
+  required to stay inside the output directory: the writer throws on escape,
+  the deletes treat an escaping path as not-found, and `deleteById`'s
+  tampered-manifest path is covered.
+- **Non-numeric config values no longer poison browser ranking.** `fromObject`
+  coerced int/float fields with `Number(value)`, so a CMS value like `"high"`
+  stored `NaN` and emitted it into `window.scolta.scoring`, silently breaking
+  scoring in the browser. On NaN the effective default (base or preset) is
+  kept, with a once-per-field warning. (PHP coerces `(float)"junk"` to `0.0`,
+  so the NaN passthrough was already a divergence, not parity.)
+- **Stemmer WASM load failure no longer throws raw from every `stem()` call.**
+  A missing/corrupt vendored `stemmer-wasm/` module threw the bare require
+  error; the load is now guarded — warn once, fall back to identity stemming —
+  and the loader path is injectable for tests.
+- **Timeouts are a typed error.** `AiClient.post()` flattened
+  `AbortSignal.timeout()` rejections into the generic request-failure Error;
+  they now surface as `AiTimeoutError` so callers can tell a slow provider
+  from a misconfigured one. The Anthropic/OpenAI response bodies are also read
+  through explicit `unknown` narrowing instead of `as any` chains (same
+  lenient empty-string behaviour on shape mismatch).
+- **CJS consumers resolved ESM-flavoured types.** The exports map pointed both
+  the `import` and `require` conditions at the single `.d.ts` under
+  `"type": "module"` (attw "masquerading as ESM"); each condition now resolves
+  its own types file (`.d.cts` for `require`), with `typesVersions` covering
+  node10-style subpath resolution.
 - **`BuildState.cleanup()` no longer deletes files the build does not own —
   in particular `amazee-credentials.json` (`src/index/build-state.ts`).** The
   fresh-build cleanup deleted every regular file at the state-dir root, and
@@ -57,6 +106,40 @@
   the PHP-parity `BudgetAwareProviderDecorator.isBudgetError()` static helper,
   now the single budget-error classification used by the decorator,
   `AmazeeAiService`, and `KeyExpiryRecovery`.
+
+### Added
+
+- **`scolta/adapter` subpath** — the helpers every JS framework adapter
+  (scolta-next/scolta-nuxt/scolta-astro) had duplicated file-for-file:
+  the static-output crawl (`exportPathToUrl` + `crawlStaticHtml`), the
+  vendored-asset copy (`resolveScoltaAssetsDir`/`copyDir`/`copyAssets`),
+  the `window.scolta` bootstrap (`buildWindowScolta`), and the default
+  AI-service wiring (`defaultAiService` + `endpointResultToResponse`).
+  Built as its own sequential tsup pass: a shared multi-entry build makes
+  rollup-dts split declarations into a chunk whose re-exports become
+  `declare const X: typeof X` values — downstream `ai.AiServiceLike`-style
+  type usage then fails to compile — and a parallel config array races one
+  pass's `clean` against the other's output.
+- **CI and tag-triggered releases.** `.github/workflows/ci.yml` (PRs + main;
+  Node 20/22 matrix; `npm ci`, build, test, typecheck, lint,
+  `check:publish`) and `.github/workflows/release.yml` (`v*.*.*` tags publish
+  to npm via OIDC Trusted Publishing — no long-lived token, automatic
+  provenance).
+- **Publish-shape gate.** `check:publish` runs publint +
+  `@arethetypeswrong/cli` against the packed tarball; part of the local and
+  CI gates.
+
+### Changed
+
+- eslint moved to `recommendedTypeChecked` (projectService) so
+  `no-floating-promises`/`no-misused-promises` actually run;
+  `no-explicit-any` back at warn; all surfaced fallout fixed (typed
+  `PagefindModule` for the optional-peer dynamic import, `unknown`-narrowed
+  `JSON.parse` sites, Amazee error details no longer stringify as
+  `[object Object]`, `Number.isFinite` guard on the Node-version check).
+- vitest 1.6 -> 3.2.6 (dev-only; pulls vite 7 / patched esbuild for the
+  GHSA-67mh-4wv8-2f99 dev-server advisory).
+- package metadata: `repository`/`bugs` fields added.
 
 ## [1.0.0] - 2026-06-09
 
