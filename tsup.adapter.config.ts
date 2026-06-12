@@ -5,6 +5,11 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: { adapter: "src/adapter/index.ts" },
   format: ["esm", "cjs"],
+  // import.meta.url is empty ({}) in the CJS output without this: the shim
+  // derives it from __filename, so the assets-dir/stemmer-WASM resolution
+  // works under require() too. Without it, require("scolta") crashed at
+  // module load (fileURLToPath(undefined) in the top-level ASSETS const).
+  shims: true,
   dts: true,
   clean: false,
   sourcemap: true,
