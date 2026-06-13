@@ -20,6 +20,11 @@
   re-synced byte-for-byte to the scolta-php #210 canonical text (the FILTER
   block was already in sync).
 
+### Changed
+
+- Update the README status section: 1.0.0 is published to npm (the section
+  still said "In development").
+
 ## [1.0.1] - 2026-06-12
 
 ### Fixed
