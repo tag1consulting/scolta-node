@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Re-vendored the browser bundle (`scolta.js`/`scolta.css`) from scolta-php
+  `main`, picking up three client-side fixes that had not yet reached the Node
+  binding.** scolta-php #217 stops the sub-word frequency guard from sizing its
+  corpus with a match-all `pagefind.search(null)` (which downloaded the entire
+  Pagefind word index — the Athenaeum AI-Overview latency stall); the guard now
+  uses a cached-totals `subwordCorpusSize()` helper. scolta-php #210 fixes a
+  silent sort drop on unmatched subjects (generic queries like "newest posts"
+  now sort unscoped instead of being dropped) and tunes the sort-intent prompt.
+  scolta-php #213 adds the auto topic-filter recall guard that *offers* a
+  low-recall filter as a dismissable chip instead of applying it (the new
+  `.scolta-filter-offer`/`.scolta-filter-apply` CSS). `assets/js/scolta.js` and
+  `assets/css/scolta.css` are byte-identical to scolta-php's canonical assets.
+  The SORT intent prompt block in `src/ai/intent-blocks.generated.ts` was
+  re-synced byte-for-byte to the scolta-php #210 canonical text (the FILTER
+  block was already in sync).
+
 ## [1.0.1] - 2026-06-12
 
 ### Fixed
