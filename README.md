@@ -25,7 +25,7 @@ It is a faithful port of [`scolta-php`](../scolta-php), tracking the
 
 ## Status
 
-In development — see `CHANGELOG.md`.
+Stable — published to npm as [`scolta`](https://www.npmjs.com/package/scolta). See `CHANGELOG.md` for release history.
 
 ## Tests
 
