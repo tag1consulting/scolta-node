@@ -69,7 +69,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check:publish": "publint && attw --pack ."
+    "check:publish": "publint && attw --pack .",
+    "check:pack": "node scripts/check-pack-contents.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0",
