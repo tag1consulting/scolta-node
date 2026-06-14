@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **npm pack-content guard (`scripts/check-pack-contents.mjs`, wired into CI as
+  `npm run check:pack`).** Runs `npm pack --dry-run --json` and asserts every
+  packed path falls inside an allowlist *derived at runtime from the
+  package.json `files` field* (`dist/`, `assets/`, plus the listed root files
+  and the always-included `package.json`), and that the unpacked size stays
+  under a cap of ~2x the measured-good artifact (baseline 3,570,505 bytes /
+  ~3.41 MB; cap 7,200,000 bytes). The `files` field is already a fail-closed
+  publish allowlist; this is the regression test that keeps it true — a stray
+  include, a loosened `files` entry, or bulky build output now fails loudly in
+  CI instead of shipping to the registry, printing exactly which path leaked
+  and pointing at the filter. Precedent: the scolta-wp ~13 MB zip incident and
+  the WP.org dist-cruft review flags.
+
 ### Fixed
 
 - **Re-vendored the browser bundle (`scolta.js`/`scolta.css`) from scolta-php

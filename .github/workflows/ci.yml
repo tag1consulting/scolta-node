@@ -29,3 +29,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run check:publish
+      # Regression guard for the npm publish surface: assert `npm pack` only
+      # ships paths derived from package.json `files`, and stays under a size
+      # cap (~2x the measured-good artifact). See scripts/check-pack-contents.mjs.
+      - run: npm run check:pack
