@@ -4,6 +4,27 @@
 
 ### Fixed
 
+- **Auto-provisioned Amazee credentials stored without resolved model names no
+  longer leave AI permanently broken (`src/ai/amazee/auto-provisioner.ts`,
+  `src/ai/amazee-service.ts`).** Provisioning persists credentials and resolves
+  model names as two non-atomic steps: `AmazeeTrialProvisioner.provision()`
+  stores the token+url, then calls `/model/info`. When that call fails,
+  `AmazeeClient.getAvailableModels()` swallows the error and returns `[]`, so no
+  model name is stored — but `FilesystemConfigStorage.load()` requires only
+  token+url, so the half-provisioned credentials read as valid.
+  `AutoProvisioner.ensureAiAvailable()` short-circuited on stored credentials
+  and never re-resolved, and `AmazeeAiService.buildClient()` fell back to the
+  dated config default (`claude-sonnet-4-5-20250929`) — which the Amazee LiteLLM
+  gateway rejects with HTTP 400 "Invalid model name", failing AI silently
+  (summarize → `{}`, expand → unexpanded 200) with no self-recovery (outside
+  `KeyExpiryRecovery`'s auth-only remit). Now: `ensureAiAvailable()` treats
+  credentials-without-a-stored-model as an incomplete provision and re-resolves
+  against the **already-stored key** (never a fresh trial, which would waste a
+  server-limited allocation), and `buildClient()` degrades to the no-AI path
+  (HTTP 200) when no model is resolvable instead of sending the dated default.
+  A regression test drives the full provision → failed-resolution → degrade →
+  self-heal sequence.
+
 - **Re-vendored the browser bundle (`scolta.js`/`scolta.css`) from scolta-php
   `main`, picking up three client-side fixes that had not yet reached the Node
   binding.** scolta-php #217 stops the sub-word frequency guard from sizing its

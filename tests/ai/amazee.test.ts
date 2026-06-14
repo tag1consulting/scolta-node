@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCacheDriver } from "../../src/cache.js";
 import { ScoltaConfig } from "../../src/config.js";
 import { AiClient } from "../../src/ai/client.js";
+import { ApiKeyMissingError } from "../../src/errors.js";
 import {
   AmazeeClient,
   AmazeeModelResolver,
@@ -94,9 +95,10 @@ describe("AutoProvisioner.ensureAiAvailable", () => {
     expect(storage.load()).toBeNull();
   });
 
-  it("is a no-op (idempotent) when credentials are already stored", async () => {
+  it("is a no-op (idempotent) when credentials AND a model are already stored", async () => {
     const storage = new MemoryConfigStorage();
     storage.store("existing", "https://existing.example", "eu");
+    storage.storeModels("claude-sonnet-4-5", "claude-haiku-3-5");
     let called = false;
     const client = amazeeClient(() => {
       called = true;
@@ -105,6 +107,35 @@ describe("AutoProvisioner.ensureAiAvailable", () => {
     const provisioned = await AutoProvisioner.ensureAiAvailable(storage, { client });
     expect(provisioned).toBe(false);
     expect(called).toBe(false);
+  });
+
+  it("self-heals an incomplete provision by re-resolving models against the stored key", async () => {
+    // Credentials stored, but no model resolved (a provision whose /model/info
+    // call failed). This must NOT stay a permanent no-op: re-resolve against the
+    // stored key, without provisioning a new trial.
+    const storage = new MemoryConfigStorage();
+    storage.store("stored-tok", "https://llm.amazee.ai", "eu");
+    let trialCalls = 0;
+    const client = amazeeClient((url) => {
+      if (url.includes("/auth/generate-trial-access")) {
+        trialCalls += 1;
+        return { json: TRIAL };
+      }
+      if (url.includes("/model/info")) return { json: MODELS };
+      throw new Error(`unexpected amazee URL ${url}`);
+    });
+
+    const provisioned = await AutoProvisioner.ensureAiAvailable(storage, {
+      client,
+      onModelsResolved: (a, e) => storage.storeModels(a, e),
+    });
+
+    expect(provisioned).toBe(false); // not a new trial — a model-only heal
+    expect(trialCalls).toBe(0); // never provisioned a new trial
+    expect(storage.storedModels()).toEqual({
+      ai_model: "claude-sonnet-4-5",
+      ai_expansion_model: "claude-haiku-3-5",
+    });
   });
 
   it("returns false (degrades) when the Amazee API errors", async () => {
@@ -217,6 +248,57 @@ describe("AmazeeAiService", () => {
     expect(expanded).toBe("model=claude-haiku-3-5");
   });
 
+  it("self-heals a model-less provision instead of sending the gateway the dated default", async () => {
+    // Regression: a provision whose /model/info call fails stores credentials
+    // with no resolved model. The service used to fall back to the dated config
+    // default (claude-sonnet-4-5-20250929), which the Amazee gateway rejects
+    // with HTTP 400, breaking AI permanently and silently. It must instead
+    // degrade (HTTP 200 path) and self-heal once /model/info recovers.
+    const storage = new MemoryConfigStorage();
+    const gatewayModels: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      gatewayModels.push(body.model);
+      if (body.model === "claude-sonnet-4-5-20250929") {
+        // Exactly what the real gateway does with the dated name.
+        return new Response(JSON.stringify({ error: { message: "Invalid model name" } }), { status: 400 });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: `model=${body.model}` } }] }),
+        { status: 200 },
+      );
+    });
+
+    let trialCalls = 0;
+    let modelInfoEmpty = true;
+    const amazee = amazeeClient((url) => {
+      if (url.includes("/auth/generate-trial-access")) {
+        trialCalls += 1;
+        return { json: TRIAL };
+      }
+      if (url.includes("/model/info")) return { json: modelInfoEmpty ? { data: [] } : MODELS };
+      throw new Error(`unexpected amazee URL ${url}`);
+    });
+
+    // Phase 1: provision stores creds, but /model/info returns nothing.
+    const service1 = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
+    await expect(service1.message("system", "user")).rejects.toBeInstanceOf(ApiKeyMissingError);
+    expect(storage.load()?.litellm_token).toBe("lt-token");
+    expect(storage.storedModels().ai_model).toBeUndefined();
+    // The dated default was NEVER sent to the gateway — it degraded first.
+    expect(gatewayModels).toEqual([]);
+
+    // Phase 2: /model/info recovers. A fresh service over the SAME storage (no
+    // manual clear) self-heals — re-resolving against the stored key (no new
+    // trial), then driving the gateway with the real model.
+    modelInfoEmpty = false;
+    const service2 = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
+    expect(await service2.message("system", "user")).toBe("model=claude-sonnet-4-5");
+    expect(storage.storedModels().ai_model).toBe("claude-sonnet-4-5");
+    expect(gatewayModels).toEqual(["claude-sonnet-4-5"]); // only the resolved model, never the dated default
+    expect(trialCalls).toBe(1); // healed by re-resolving, not by burning a new trial
+  });
+
   it("uses the explicit key as-is and never provisions", async () => {
     const storage = new MemoryConfigStorage();
     const urls: string[] = [];
@@ -263,10 +345,17 @@ describe("AmazeeAiService", () => {
     error: { message: "Authentication Error - Expired Key. Key Expired. code: expired_key" },
   });
 
-  /** Storage pre-seeded with stored-but-revoked trial credentials. */
+  /**
+   * Storage pre-seeded with stored-but-revoked trial credentials. A real
+   * provisioned trial resolved its models at provision time, so the seed
+   * includes them — the call then reaches the gateway with a valid model and
+   * fails on the expired *key* (auth), which is what recovery keys off. Without
+   * a stored model the service correctly degrades before any gateway call.
+   */
   function expiredStorage(): MemoryConfigStorage {
     const storage = new MemoryConfigStorage();
     storage.store("expired-tok", "https://llm.amazee.ai", "eu");
+    storage.storeModels("claude-sonnet-4-5", "claude-haiku-3-5");
     return storage;
   }
 

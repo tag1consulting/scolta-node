@@ -35,12 +35,36 @@ export class AutoProvisioner {
    * cheap lazy-init guard cannot know. Call-time auth failures are the
    * reliable signal: {@link KeyExpiryRecovery} detects them and recovers
    * through {@link reprovision}, which bypasses this no-op.
+   *
+   * Stored credentials are treated as a *complete* provision only once their
+   * model names are resolved. A provision whose `/model/info` call failed
+   * stores token+url with no models, and the client builder would then send
+   * the gateway the dated config default it rejects (HTTP 400), breaking AI
+   * permanently because this guard kept no-opping on the half-provisioned
+   * credentials. When credentials are stored but no model is, model resolution
+   * is re-attempted against the ALREADY-STORED key — never a fresh trial,
+   * which would waste a server-side-limited allocation — so the
+   * incomplete-provision state self-heals.
    */
   static async ensureAiAvailable(storage: ConfigStorage, opts: EnsureAiOptions = {}): Promise<boolean> {
     if (opts.hasExplicitApiKey) {
       return false;
     }
-    if (storage.load() !== null) {
+
+    const creds = storage.load();
+    if (creds !== null) {
+      // Fully provisioned (creds + resolved model) — nothing to do.
+      if (storage.storedModels().ai_model) {
+        return false;
+      }
+      // Incomplete provision: re-resolve models against the stored key.
+      const models = await new AmazeeModelResolver(opts.client ?? new AmazeeClient()).resolve(
+        creds.litellm_api_url,
+        creds.litellm_token,
+      );
+      if (opts.onModelsResolved && (models.ai_model !== null || models.ai_expansion_model !== null)) {
+        opts.onModelsResolved(models.ai_model ?? "", models.ai_expansion_model ?? "");
+      }
       return false;
     }
 
