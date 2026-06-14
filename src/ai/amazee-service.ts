@@ -172,19 +172,22 @@ export class AmazeeAiService extends AiServiceAdapter {
     });
 
     const creds = this.storage.load();
-    if (creds === null) {
-      // Provisioning failed or the network was unreachable. Fall back to the
-      // configured client; with no key it throws ApiKeyMissingError, which the
-      // endpoint handler degrades to unexpanded/no-summary (HTTP 200).
+    const models = creds === null ? null : this.storage.storedModels();
+    if (creds === null || !models?.ai_model) {
+      // No credentials, or an incomplete provision whose model resolution never
+      // succeeded (provisioning's /model/info call failed). Falling back to the
+      // configured client — with no key it throws ApiKeyMissingError, which the
+      // endpoint handler degrades to unexpanded/no-summary (HTTP 200), the same
+      // path as no credentials. Critically we must NOT build the gateway client
+      // with the dated config default, which the gateway rejects with HTTP 400.
       return new AiClient(config.toAiClientConfig());
     }
 
-    const models = this.storage.storedModels();
     return new AiClient({
       provider: "openai",
       api_key: creds.litellm_token,
       base_url: creds.litellm_api_url,
-      model: models.ai_model ?? config.ai_model,
+      model: models.ai_model,
     });
   }
 
