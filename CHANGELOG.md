@@ -56,10 +56,34 @@
   re-synced byte-for-byte to the scolta-php #210 canonical text (the FILTER
   block was already in sync).
 
+- **Invalid-number config warnings are no longer permanently suppressed across
+  config reloads (`src/config.ts`).** The `warnedInvalidNumbers` dedupe set was
+  module-global and never reset, so it grew for the process lifetime: a config
+  reloaded with a bad numeric value never re-warned, and the warning path was
+  untestable in isolation (the first test to hit it silenced it for the rest of
+  the run). The set is now reset at the start of each `ScoltaConfig.fromObject`
+  call, so the warning still fires once per field within a load but re-warns on
+  the next (re)load. A regression test asserts a second load re-warns.
+
 ### Changed
 
 - Update the README status section: 1.0.0 is published to npm (the section
   still said "In development").
+
+- **The release workflow now runs the publish-surface guards before
+  `npm publish` (`.github/workflows/release.yml`).** `check:publish` (publint +
+  are-the-types-wrong) and `check:pack` (pack-content allowlist + size cap)
+  previously gated only `ci.yml` on PRs, never the release workflow that
+  actually publishes — so a tagged commit could publish a tarball the PR gate
+  would have rejected. Both guards now run after `build`/`test` and before
+  `npm publish`, gating the published tarball the same way CI gates PRs.
+
+- **Pinned npm to `11.17.0` in the release workflow to match CI
+  (`.github/workflows/release.yml`).** The release job installed `npm@latest`
+  while `ci.yml` pins `npm@11.17.0` (the version that generated the fleet's
+  lockfiles); an unpinned npm could resolve or regenerate the tree differently
+  than CI validated. `11.17.0` still satisfies Trusted Publishing's `>= 11.5.1`
+  floor.
 
 ## [1.0.1] - 2026-06-12
 

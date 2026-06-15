@@ -113,15 +113,19 @@ describe("ScoltaConfig", () => {
     expect(c2.toAiClientConfig()["base_url"]).toBe("https://x/v1");
   });
 
-  it("non-numeric float value keeps the base default and warns once", () => {
+  it("non-numeric float value keeps the base default and re-warns on each load", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const c = ScoltaConfig.fromObject({ title_match_boost: "high" });
       expect(c.title_match_boost).toBe(2.0);
       expect(c.toJsScoringConfig()["TITLE_MATCH_BOOST"]).toBe(2.0);
+      // Within a single load, the bad field warns exactly once.
       expect(warn).toHaveBeenCalledTimes(1);
+      // A second, independent load is a fresh dedupe scope: the warning fires
+      // again rather than being silenced for the lifetime of the process.
+      // (Before the per-load reset this stayed at 1 — permanently suppressed.)
       ScoltaConfig.fromObject({ title_match_boost: "high" });
-      expect(warn).toHaveBeenCalledTimes(1); // once per field per process
+      expect(warn).toHaveBeenCalledTimes(2);
     } finally {
       warn.mockRestore();
     }

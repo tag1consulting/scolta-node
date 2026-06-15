@@ -168,7 +168,13 @@ export const FIELD_KINDS: Record<string, FieldKind> = {
   preset: "string",
 };
 
-/** Numeric fields already warned about, so a bad value logs once per process. */
+/**
+ * Numeric fields already warned about during the current load, so a bad value
+ * logs once per `fromObject` call rather than once per field per process. The
+ * set is reset at the start of each load (see {@link ScoltaConfig.fromObject}),
+ * so a stale value re-warns on the next config (re)load instead of being
+ * silenced for the lifetime of the process.
+ */
 const warnedInvalidNumbers = new Set<string>();
 
 export class ScoltaConfig {
@@ -274,6 +280,12 @@ export class ScoltaConfig {
     const config = new ScoltaConfig();
     const valid = new Set(Object.keys(FIELD_KINDS));
 
+    // Fresh dedupe scope per load: a bad value warns once within this call but
+    // re-warns on the next load. Without this, the module-level set grows for
+    // the process lifetime — a reloaded config never re-warns, and the warning
+    // path is untestable in isolation (one test silences it for the rest).
+    warnedInvalidNumbers.clear();
+
     const preset = values["preset"];
     if (typeof preset === "string" && preset in PRESETS) {
       config.preset = preset;
@@ -293,7 +305,7 @@ export class ScoltaConfig {
       const coerced = ScoltaConfig.coerce(key, value);
       // A non-numeric string coerced to NaN would flow into
       // `window.scolta.scoring` and silently break browser ranking. Keep the
-      // effective default (base or preset) and warn once per field instead.
+      // effective default (base or preset) and warn once per field per load.
       if (typeof coerced === "number" && Number.isNaN(coerced)) {
         if (!warnedInvalidNumbers.has(key)) {
           warnedInvalidNumbers.add(key);
