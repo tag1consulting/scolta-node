@@ -475,3 +475,26 @@ describe("AmazeeAiService", () => {
     expect(storage.load()).toBeNull();
   });
 });
+
+describe("AmazeeClient control-plane headers", () => {
+  it("sends Referer: scolta-node on control-plane POST and GET requests", async () => {
+    const seen: Record<string, string | undefined> = {};
+    const fetchImpl: typeof fetch = async (url, init) => {
+      const method = init?.method ?? "GET";
+      seen[method] = (init?.headers as Record<string, string>)?.["Referer"];
+      const u = String(url);
+      if (u.includes("/auth/generate-trial-access")) {
+        return new Response(JSON.stringify({
+          key: { litellm_token: "lt", litellm_api_url: "https://llm.amazee.ai", region: "eu" },
+        }), { status: 200 });
+      }
+      if (u.includes("/regions")) return new Response(JSON.stringify({ regions: [] }), { status: 200 });
+      return new Response("{}", { status: 404 });
+    };
+    const client = new AmazeeClient("https://api.amazee.ai", fetchImpl);
+    await client.provisionTrial();
+    await client.listRegions("sess-token");
+    expect(seen["POST"]).toBe("scolta-node");
+    expect(seen["GET"]).toBe("scolta-node");
+  });
+});
