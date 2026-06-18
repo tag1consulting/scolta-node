@@ -7,10 +7,10 @@
 - **`Referer: scolta-node` header on Amazee control-plane requests
   (`src/ai/amazee/client.ts`).** The `post`/`get` helpers that hit
   `api.amazee.ai` now send `Referer: scolta-node` so the Amazee backend can
-  attribute control-plane traffic to this SDK. Port of @dan2k3k4's scolta-php
-  #203 (issue #202) with the package-specific value. The per-tenant LiteLLM
-  calls are unchanged. Covered by a test asserting the header on a POST and a
-  GET.
+  attribute control-plane traffic to this SDK. Port of @dan2k3k4's
+  tag1consulting/scolta-php#203 (issue tag1consulting/scolta-php#202) with the
+  package-specific value. The per-tenant LiteLLM calls are unchanged. Covered by
+  a test asserting the header on a POST and a GET.
 - **npm pack-content guard (`scripts/check-pack-contents.mjs`, wired into CI as
   `npm run check:pack`).** Runs `npm pack --dry-run --json` and asserts every
   packed path falls inside an allowlist *derived at runtime from the
