@@ -126,6 +126,7 @@ export class AmazeeClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
+      Referer: "scolta-node",
     };
     if (bearer !== undefined) {
       headers["Authorization"] = `Bearer ${bearer}`;
@@ -145,7 +146,7 @@ export class AmazeeClient {
   }
 
   private async get(path: string, bearer?: string): Promise<JsonObject> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { Accept: "application/json", Referer: "scolta-node" };
     if (bearer !== undefined) {
       headers["Authorization"] = `Bearer ${bearer}`;
     }
