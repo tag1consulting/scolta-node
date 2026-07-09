@@ -147,41 +147,6 @@ describe("AutoProvisioner.ensureAiAvailable", () => {
   });
 });
 
-describe("AutoProvisioner.reprovision", () => {
-  // The expired-key recovery entry point: unlike ensureAiAvailable(), stored
-  // credentials must NOT short-circuit — they are known-bad when this runs.
-
-  it("replaces stored (known-bad) credentials with a fresh trial", async () => {
-    const storage = new MemoryConfigStorage();
-    storage.store("expired-tok", "https://old.amazee.ai", "eu");
-
-    const provisioned = await AutoProvisioner.reprovision(storage, {
-      client: amazeeClient(provisioningResponder()),
-    });
-
-    expect(provisioned).toBe(true);
-    expect(storage.load()).toEqual({
-      litellm_token: "lt-token",
-      litellm_api_url: "https://llm.amazee.ai",
-      region: "eu",
-    });
-  });
-
-  it("returns false on an API error, with the known-bad credentials cleared", async () => {
-    const storage = new MemoryConfigStorage();
-    storage.store("expired-tok", "https://old.amazee.ai", "eu");
-
-    const provisioned = await AutoProvisioner.reprovision(storage, {
-      client: amazeeClient(() => ({ status: 500, json: { detail: "boom" } })),
-    });
-
-    expect(provisioned).toBe(false);
-    // Cleared is correct: the creds were known-bad, and an empty store lets
-    // ensureAiAvailable() retry on the next lazy-init pass.
-    expect(storage.load()).toBeNull();
-  });
-});
-
 describe("AmazeeModelResolver", () => {
   it("picks the highest-version model in each family", () => {
     const resolver = new AmazeeModelResolver({} as AmazeeClient);
@@ -333,8 +298,10 @@ describe("AmazeeAiService", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Key-expiry recovery — an expired Amazee trial key triggers a guarded
-  // re-provision and exactly one retry with the fresh credentials.
+  // Expired-credential handling — when the stored Amazee credentials are no
+  // longer accepted, AI turns off cleanly and the site is flagged for admin
+  // re-authentication. The stored credentials are left in place and no
+  // replacement credentials are requested on this path.
   //
   // Regression (django demo, 2026-06-09): expired key → every call 400
   // expired_key → expand silently echoed the query while ensureAiAvailable
@@ -349,8 +316,7 @@ describe("AmazeeAiService", () => {
    * Storage pre-seeded with stored-but-revoked trial credentials. A real
    * provisioned trial resolved its models at provision time, so the seed
    * includes them — the call then reaches the gateway with a valid model and
-   * fails on the expired *key* (auth), which is what recovery keys off. Without
-   * a stored model the service correctly degrades before any gateway call.
+   * fails on the expired *key* (auth), which is what this path keys off.
    */
   function expiredStorage(): MemoryConfigStorage {
     const storage = new MemoryConfigStorage();
@@ -359,95 +325,67 @@ describe("AmazeeAiService", () => {
     return storage;
   }
 
-  /** A counting provisioning responder, so "exactly once" is assertable. */
-  function countingProvisioner(): { client: AmazeeClient; calls: () => number } {
-    let calls = 0;
-    const responder = provisioningResponder();
-    return {
-      client: amazeeClient((url, init) => {
-        calls += 1;
-        return responder(url, init);
-      }),
-      calls: () => calls,
-    };
+  /** A control-plane client that fails the test if any request reaches it. */
+  function unusedControlPlane(reason: string): AmazeeClient {
+    return amazeeClient(() => {
+      throw new Error(reason);
+    });
   }
 
-  it("re-provisions once and retries with the fresh credentials on an expired key", async () => {
+  it("degrades and flags for re-authentication on an expired key, leaving credentials in place", async () => {
     const storage = expiredStorage();
-    const bearers: string[] = [];
-    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
-      const bearer = (init.headers as Record<string, string>)["Authorization"] ?? "";
-      bearers.push(bearer);
-      if (bearer === "Bearer expired-tok") {
-        return new Response(EXPIRED_KEY_BODY, { status: 400 });
-      }
-      return new Response(JSON.stringify({ choices: [{ message: { content: "recovered" } }] }), { status: 200 });
-    });
+    vi.stubGlobal("fetch", async () => new Response(EXPIRED_KEY_BODY, { status: 400 }));
+    const amazee = unusedControlPlane("must not request replacement credentials on an auth failure");
 
-    const provisioner = countingProvisioner();
-    const service = new AmazeeAiService(config(), storage, { amazeeClient: provisioner.client });
-    service.setKeyExpiryRecovery(
-      new KeyExpiryRecovery(storage, new InMemoryCacheDriver(), { client: provisioner.client }),
-    );
+    const recovery = new KeyExpiryRecovery(storage, new InMemoryCacheDriver());
+    const service = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
+    service.setKeyExpiryRecovery(recovery);
 
-    expect(await service.message("system", "user")).toBe("recovered");
-    // Retry was made with a client rebuilt from the fresh credentials.
-    expect(bearers).toEqual(["Bearer expired-tok", "Bearer lt-token"]);
-    // Fresh credentials stored for subsequent requests; provisioned exactly
-    // once (trial + model info).
-    expect(storage.load()?.litellm_token).toBe("lt-token");
-    expect(provisioner.calls()).toBe(2);
+    // Nothing to retry: the original failure propagates and the endpoint layer
+    // degrades it to unexpanded/no-summary (HTTP 200).
+    await expect(service.message("system", "user")).rejects.toThrow(/expired_key/);
 
-    // Subsequent calls use the recovered client directly — no more failures.
-    expect(await service.message("system", "again")).toBe("recovered");
-    expect(provisioner.calls()).toBe(2);
+    expect(storage.load()?.litellm_token).toBe("expired-tok"); // credentials intact
+    expect(recovery.isAuthFailing()).toBe(true); // health reports AI degraded
+    expect(recovery.isUpgradeNeeded()).toBe(true); // site flagged for re-authentication
   });
 
-  it("recovers on the conversation path too", async () => {
+  it("degrades on the conversation path too", async () => {
     const storage = expiredStorage();
-    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
-      const bearer = (init.headers as Record<string, string>)["Authorization"] ?? "";
-      if (bearer === "Bearer expired-tok") {
-        return new Response(EXPIRED_KEY_BODY, { status: 400 });
-      }
-      return new Response(JSON.stringify({ choices: [{ message: { content: "recovered" } }] }), { status: 200 });
-    });
+    vi.stubGlobal("fetch", async () => new Response(EXPIRED_KEY_BODY, { status: 400 }));
+    const amazee = unusedControlPlane("must not request replacement credentials on an auth failure");
 
-    const provisioner = countingProvisioner();
-    const service = new AmazeeAiService(config(), storage, { amazeeClient: provisioner.client });
-    service.setKeyExpiryRecovery(
-      new KeyExpiryRecovery(storage, new InMemoryCacheDriver(), { client: provisioner.client }),
-    );
+    const recovery = new KeyExpiryRecovery(storage, new InMemoryCacheDriver());
+    const service = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
+    service.setKeyExpiryRecovery(recovery);
 
-    expect(await service.conversation("system", [{ role: "user", content: "hi" }])).toBe("recovered");
+    await expect(service.conversation("system", [{ role: "user", content: "hi" }])).rejects.toThrow(/expired_key/);
+    expect(recovery.isUpgradeNeeded()).toBe(true);
   });
 
-  it("a budget error never triggers re-provisioning", async () => {
-    // Budget exhaustion must route to the budget path, not re-provisioning: a
-    // fresh trial key would reset the spend ceiling, which is the upgrade
-    // flow's job. The throwing Amazee client makes any provisioning call fail
-    // the test.
+  it("routes a budget error to the budget path, not credential handling", async () => {
+    // Budget exhaustion must route to the budget path: it is not an auth-class
+    // failure and must not mark credentials as failing or flag for re-auth.
     const storage = expiredStorage();
     vi.stubGlobal("fetch", async () => {
       throw new Error("Budget has been exceeded!");
     });
-    const amazee = amazeeClient(() => {
-      throw new Error("must not re-provision on a budget error");
-    });
+    const amazee = unusedControlPlane("must not touch the control plane on a budget error");
 
+    const recovery = new KeyExpiryRecovery(storage, new InMemoryCacheDriver());
     const service = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
-    service.setKeyExpiryRecovery(new KeyExpiryRecovery(storage, new InMemoryCacheDriver(), { client: amazee }));
+    service.setKeyExpiryRecovery(recovery);
 
     await expect(service.message("system", "user")).rejects.toBeInstanceOf(AmazeeBudgetExceededException);
     expect(storage.load()?.litellm_token).toBe("expired-tok"); // storage untouched
+    expect(recovery.isAuthFailing()).toBe(false);
+    expect(recovery.isUpgradeNeeded()).toBe(false);
   });
 
   it("an auth failure without recovery wired propagates unchanged", async () => {
     const storage = expiredStorage();
     vi.stubGlobal("fetch", async () => new Response(EXPIRED_KEY_BODY, { status: 400 }));
-    const amazee = amazeeClient(() => {
-      throw new Error("must not provision without recovery wired");
-    });
+    const amazee = unusedControlPlane("must not touch the control plane without recovery wired");
 
     const service = new AmazeeAiService(config(), storage, { amazeeClient: amazee });
 
@@ -455,24 +393,25 @@ describe("AmazeeAiService", () => {
     expect(storage.load()?.litellm_token).toBe("expired-tok");
   });
 
-  it("never re-provisions over an explicit user key, even with recovery wired", async () => {
-    // An explicit key failing auth is the user's key to fix — replacing it
-    // with an Amazee trial behind their back would mask the misconfiguration.
+  it("never records a failure over an explicit user key, even with recovery wired", async () => {
+    // An explicit key failing auth is the user's key to fix — flagging the
+    // Amazee re-authentication prompt would misattribute the misconfiguration.
     const storage = new MemoryConfigStorage();
     vi.stubGlobal("fetch", async () => new Response("{}", { status: 401 }));
-    const amazee = amazeeClient(() => {
-      throw new Error("must not provision over an explicit key");
-    });
+    const amazee = unusedControlPlane("must not touch the control plane over an explicit key");
 
+    const recovery = new KeyExpiryRecovery(storage, new InMemoryCacheDriver());
     const service = new AmazeeAiService(
       config({ ai_provider: "anthropic", ai_api_key: "sk-ant-user" }),
       storage,
       { amazeeClient: amazee },
     );
-    service.setKeyExpiryRecovery(new KeyExpiryRecovery(storage, new InMemoryCacheDriver(), { client: amazee }));
+    service.setKeyExpiryRecovery(recovery);
 
     await expect(service.message("system", "user")).rejects.toThrow(/invalid or expired/);
     expect(storage.load()).toBeNull();
+    expect(recovery.isAuthFailing()).toBe(false);
+    expect(recovery.isUpgradeNeeded()).toBe(false);
   });
 });
 

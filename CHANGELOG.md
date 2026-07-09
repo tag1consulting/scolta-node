@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Improved handling of expired or revoked Amazee.ai credentials in the AI
+  recovery path (`src/ai/amazee/key-expiry-recovery.ts`,
+  `src/ai/amazee/auto-provisioner.ts`, `src/ai/amazee-service.ts`).** When the
+  stored credentials are no longer accepted, AI now degrades cleanly and the
+  site is flagged for admin re-authentication (a new persistent
+  upgrade-needed marker adapters can read); AI health status more accurately
+  reflects credential state. The model-resolution self-heal is unchanged.
+
 ### Added
 
 - **`Referer: scolta-node` header on Amazee control-plane requests
