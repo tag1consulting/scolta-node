@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Improved handling of expired or revoked Amazee.ai credentials
+  (`src/ai/amazee/key-expiry-recovery.ts`, `src/ai/amazee/auto-provisioner.ts`,
+  `src/ai/amazee-service.ts`).** When the stored credentials are no longer
+  accepted, auth-class failures are now detected, AI degrades cleanly (never
+  silently) and the site is flagged for admin re-authentication (a new
+  persistent upgrade-needed marker adapters can read); AI health status more
+  accurately reflects credential state. The model-resolution self-heal is
+  unchanged.
+
 ### Added
 
 - **`Referer: scolta-node` header on Amazee control-plane requests
@@ -26,26 +37,25 @@
 
 ### Fixed
 
-- **Auto-provisioned Amazee credentials stored without resolved model names no
+- **Amazee credentials stored without resolved model names no
   longer leave AI permanently broken (`src/ai/amazee/auto-provisioner.ts`,
-  `src/ai/amazee-service.ts`).** Provisioning persists credentials and resolves
-  model names as two non-atomic steps: `AmazeeTrialProvisioner.provision()`
+  `src/ai/amazee-service.ts`).** Storing the credentials and resolving
+  model names are two non-atomic steps: `AmazeeTrialProvisioner.provision()`
   stores the token+url, then calls `/model/info`. When that call fails,
   `AmazeeClient.getAvailableModels()` swallows the error and returns `[]`, so no
   model name is stored — but `FilesystemConfigStorage.load()` requires only
-  token+url, so the half-provisioned credentials read as valid.
+  token+url, so the credentials read as valid.
   `AutoProvisioner.ensureAiAvailable()` short-circuited on stored credentials
   and never re-resolved, and `AmazeeAiService.buildClient()` fell back to the
   dated config default (`claude-sonnet-4-5-20250929`) — which the Amazee LiteLLM
   gateway rejects with HTTP 400 "Invalid model name", failing AI silently
-  (summarize → `{}`, expand → unexpanded 200) with no self-recovery (outside
+  (summarize → `{}`, expand → unexpanded 200) with no self-healing (outside
   `KeyExpiryRecovery`'s auth-only remit). Now: `ensureAiAvailable()` treats
-  credentials-without-a-stored-model as an incomplete provision and re-resolves
-  against the **already-stored key** (never a fresh trial, which would waste a
-  server-limited allocation), and `buildClient()` degrades to the no-AI path
-  (HTTP 200) when no model is resolvable instead of sending the dated default.
-  A regression test drives the full provision → failed-resolution → degrade →
-  self-heal sequence.
+  credentials-without-a-stored-model as incomplete and re-resolves
+  against the **already-stored key** (credentials are never re-issued), and
+  `buildClient()` degrades to the no-AI path (HTTP 200) when no model is
+  resolvable instead of sending the dated default. A regression test drives the
+  full store → failed-resolution → degrade → self-heal sequence.
 
 - **Re-vendored the browser bundle (`scolta.js`/`scolta.css`) from scolta-php
   `main`, picking up three client-side fixes that had not yet reached the Node
@@ -144,24 +154,23 @@
 - **`BuildState.cleanup()` no longer deletes files the build does not own —
   in particular `amazee-credentials.json` (`src/index/build-state.ts`).** The
   fresh-build cleanup deleted every regular file at the state-dir root, and
-  `FilesystemConfigStorage` keeps the provisioned Amazee credentials exactly
-  there: every index rebuild silently de-provisioned AI, so the next call
-  re-provisioned a new trial key — churning trial accounts and re-widening
-  the expiry exposure window the key-expiry recovery below exists to close
-  (this affects scolta-next and scolta-nuxt identically, since both pass the
-  same `stateDir` to the orchestrator and the storage). `cleanup()` now
-  removes only the build's own transients (`lock`, `manifest.json`,
-  `chunk-NNN.dat`, and their `.tmp` leftovers). This is a deliberate
+  `FilesystemConfigStorage` keeps the stored Amazee credentials exactly
+  there, so every index rebuild removed them. `cleanup()` now removes only the
+  build's own transients (`lock`, `manifest.json`, `chunk-NNN.dat`, and their
+  `.tmp` leftovers), so stored credentials survive index rebuilds where they
+  previously did not (this affects scolta-next and scolta-nuxt identically,
+  since both pass the same `stateDir` to the orchestrator and the storage). This
+  is a deliberate
   deviation from the PHP reference's delete-every-file sweep: in PHP the
   Amazee credentials live in CMS config (CMI, WP options, DB rows), never as
   files in the state dir, so the sweep was harmless there. Tests pin the
   ownership rule: own transients removed, the credentials file and foreign
   files/subdirectories spared.
-- **Health no longer reports a working Amazee-provisioned install as
+- **Health no longer reports a working Amazee-configured install as
   degraded, and "configured" no longer implies "usable" (`src/health.ts`).**
-  `HealthChecker` checked only the explicit `ai_api_key`, but auto-provisioned
-  installs store their credentials in the Amazee `ConfigStorage` — so a
-  perfectly working install reported `status: degraded` forever (the inverse
+  `HealthChecker` checked only the explicit `ai_api_key`, but installs that
+  store their credentials in the Amazee `ConfigStorage` reported
+  `status: degraded` forever even when perfectly working (the inverse
   of the php/python expired-key lie from the 2026-06-09/10 regression). The
   checker now accepts an optional Amazee credential store and cache:
   `aiConfigured` means an explicit key OR stored Amazee credentials are
@@ -170,11 +179,11 @@
   marker — never a live API call per health request). Configured-but-unusable
   now drives `status: degraded`; without the new constructor arguments,
   behavior is unchanged. Mirrors scolta-php #211's health semantics.
-- **Amazee trial-key expiry detection and guarded re-provisioning
-  (`src/ai/amazee/key-expiry-recovery.ts`, `AutoProvisioner.reprovision()`,
+- **Amazee credential auth-failure detection and clean degradation
+  (`src/ai/amazee/key-expiry-recovery.ts`,
   `AmazeeAiService.setKeyExpiryRecovery()`, `src/ai/client.ts`).** Port of the
-  scolta-php #211 fix: Amazee trial keys are revoked server-side when the
-  trial ends, the expiry is not announced at provisioning time, and nothing
+  scolta-php #211 fix: Amazee credentials are revoked server-side when their
+  lifecycle ends, the expiry is not announced at issue time, and nothing
   detected the resulting per-call auth failures —
   `AutoProvisioner.ensureAiAvailable()` no-ops whenever credentials are stored
   (now documented as deliberate), so AI stayed down fleet-wide while the
@@ -182,19 +191,23 @@
   classifies auth-class failures (`ApiKeyInvalidError`, or
   `expired_key`/`invalid_api_key`/auth-error markers anywhere in the `cause`
   chain; budget-exhaustion errors are explicitly excluded and keep routing to
-  the budget path) and runs a cache-guarded one-attempt-per-window re-provision
-  (default 600s; the guard is set *before* the attempt so a failed attempt also
-  waits out the window — windows are enforced by timestamp comparison, since
-  `CacheDriver` TTLs are advisory). `AutoProvisioner.reprovision()` bypasses
-  the stored-credentials no-op (clear, then provision fresh);
-  `AmazeeAiService.setKeyExpiryRecovery()` wires recovery into all three AI
-  call paths with exactly one retry on a client rebuilt from the fresh
-  credentials (never over an explicit user key). `AiClient` now includes a
-  truncated response body in non-401 HTTP error messages — the LiteLLM proxy
-  announces `expired_key` in a 400 body, which the status-only message
-  discarded (the PHP client's Guzzle messages always carried it). Also adds
-  the PHP-parity `BudgetAwareProviderDecorator.isBudgetError()` static helper,
-  now the single budget-error classification used by the decorator,
+  the budget path). On a detected failure it records a cache-backed auth-failure
+  marker (`CACHE_KEY_AUTH_FAILURE`; ages out after `AUTH_FAILURE_TTL` so a
+  transient blip clears itself once calls succeed) and a persistent
+  upgrade-needed marker (`CACHE_KEY_UPGRADE_NEEDED`, retained until cleared
+  explicitly), so the state survives across requests; the stored credentials are
+  left untouched and no replacement is requested — windows are enforced by
+  timestamp comparison, since `CacheDriver` TTLs are advisory.
+  `AmazeeAiService.setKeyExpiryRecovery()` wires detection into all three AI
+  call paths: on an auth failure the adapter records the state and lets the
+  request degrade gracefully (never over an explicit user key), and adapter
+  admin UIs read `KeyExpiryRecovery.isUpgradeNeeded()` to prompt the admin to
+  re-authenticate, calling `clearUpgradeNeeded()` once that succeeds. `AiClient`
+  now includes a truncated response body in non-401 HTTP error messages — the
+  LiteLLM proxy announces `expired_key` in a 400 body, which the status-only
+  message discarded (the PHP client's Guzzle messages always carried it). Also
+  adds the PHP-parity `BudgetAwareProviderDecorator.isBudgetError()` static
+  helper, now the single budget-error classification used by the decorator,
   `AmazeeAiService`, and `KeyExpiryRecovery`.
 
 ### Added

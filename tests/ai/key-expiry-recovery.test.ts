@@ -1,14 +1,17 @@
 /**
- * Expired-key detection and guarded re-provisioning (port of the PHP
- * `KeyExpiryRecoveryTest`, scolta-php #211).
+ * Expired/revoked-credential detection and graceful degradation (port of the
+ * PHP `KeyExpiryRecoveryTest`).
  *
- * Regression (django demo, 2026-06-09): an Amazee trial key expired
+ * Regression (django demo, 2026-06-09): Amazee credentials were revoked
  * server-side, every LiteLLM call returned 400 expired_key, and nothing
  * detected it — expand silently echoed the query for ~24h while
- * ensureAiAvailable() kept no-opping on the stored dead credentials.
+ * ensureAiAvailable() kept no-opping on the stored dead credentials. When the
+ * stored credentials stop being accepted, AI must turn off and the site must be
+ * flagged for an admin to re-authenticate; the stored credentials are left in
+ * place and no replacement credentials are requested on this path.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCacheDriver } from "../../src/cache.js";
 import { ApiKeyInvalidError } from "../../src/errors.js";
 import {
@@ -19,55 +22,41 @@ import {
   MemoryConfigStorage,
 } from "../../src/ai/amazee/index.js";
 
-const TRIAL = {
-  key: {
-    litellm_token: "sk-fresh-token",
-    litellm_api_url: "https://llm.test.amazee.ai",
-    region: "test-region",
-  },
-};
-const MODELS = {
-  data: [{ model_name: "claude-sonnet-4-5" }, { model_name: "claude-haiku-4-5" }],
-};
-
-interface Harness {
-  recovery: KeyExpiryRecovery;
-  storage: MemoryConfigStorage;
-  cache: InMemoryCacheDriver;
-  /** Number of HTTP calls the Amazee control plane received. */
-  calls: () => number;
-}
+const STORED = {
+  litellm_token: "sk-stored-token",
+  litellm_api_url: "https://llm.test.amazee.ai",
+  region: "test-region",
+} as const;
 
 /**
- * A recovery instance over a mocked Amazee control plane. `responses` are
- * consumed in order; any call past the end of the queue throws — mirroring
- * the PHP MockHandler so "exactly one provisioning attempt" is enforced by
- * construction.
+ * Credential store that records whether its mutators were invoked, so a test
+ * can assert the stored credentials were left untouched.
  */
-function makeRecovery(
-  responses: { status?: number; json?: unknown }[],
-  opts: { failureWindowSeconds?: number } = {},
-): Harness {
-  const storage = new MemoryConfigStorage();
-  storage.store("sk-expired-token", "https://llm.test.amazee.ai", "test-region");
-  const cache = new InMemoryCacheDriver();
+class TripwireStorage extends MemoryConfigStorage {
+  wasStored = false;
+  wasCleared = false;
 
-  let callCount = 0;
-  const fetchImpl: typeof fetch = async () => {
-    const next = responses.shift();
-    callCount += 1;
-    if (next === undefined) {
-      throw new Error("unexpected Amazee API call: mock response queue is empty");
-    }
-    return new Response(JSON.stringify(next.json ?? {}), { status: next.status ?? 200 });
-  };
+  override store(litellmToken: string, litellmApiUrl: string, region: string): void {
+    this.wasStored = true;
+    super.store(litellmToken, litellmApiUrl, region);
+  }
 
-  const recovery = new KeyExpiryRecovery(storage, cache, {
-    client: new AmazeeClient("https://api.amazee.ai", fetchImpl),
-    ...opts,
-  });
-  return { recovery, storage, cache, calls: () => callCount };
+  override clear(): void {
+    this.wasCleared = true;
+    super.clear();
+  }
 }
+
+function makeRecovery(): { recovery: KeyExpiryRecovery; storage: MemoryConfigStorage; cache: InMemoryCacheDriver } {
+  const storage = new MemoryConfigStorage();
+  storage.store(STORED.litellm_token, STORED.litellm_api_url, STORED.region);
+  const cache = new InMemoryCacheDriver();
+  return { recovery: new KeyExpiryRecovery(storage, cache), storage, cache };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // isAuthFailure() classification
@@ -96,9 +85,8 @@ describe("KeyExpiryRecovery.isAuthFailure", () => {
   });
 
   it("budget exhaustion is never an auth failure (by message or by type)", () => {
-    // Budget exhaustion belongs to BudgetAwareProviderDecorator and must
-    // never trigger re-provisioning (a fresh trial key would reset the spend
-    // ceiling — that is the upgrade flow's job).
+    // Budget exhaustion belongs to BudgetAwareProviderDecorator and follows the
+    // budget path, never this credential-handling path.
     expect(KeyExpiryRecovery.isAuthFailure(new Error(BUDGET_MESSAGE))).toBe(false);
     expect(KeyExpiryRecovery.isAuthFailure(new AmazeeBudgetExceededException(new Error("429")))).toBe(false);
   });
@@ -109,79 +97,68 @@ describe("KeyExpiryRecovery.isAuthFailure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleAuthFailure() — detection, recovery, fresh credentials
+// handleAuthFailure() — degrade, record health, flag for re-auth
 // ---------------------------------------------------------------------------
 
-describe("KeyExpiryRecovery.handleAuthFailure", () => {
-  it("expired key triggers one re-provision and stores fresh credentials", async () => {
-    const { recovery, calls } = makeRecovery([{ json: TRIAL }, { json: MODELS }]);
+describe("expired credential handling", () => {
+  it("degrades and flags for upgrade without writing credentials", async () => {
+    const { recovery, storage } = makeRecovery();
 
-    const result = await recovery.handleAuthFailure(new Error("code: expired_key"));
+    const result = recovery.handleAuthFailure(new Error("code: expired_key"));
 
-    expect(result).toBe(true);
-    expect(recovery.credentials()?.litellm_token).toBe("sk-fresh-token");
-    expect(calls()).toBe(2); // trial + model info — both provisioning calls ran
-    expect(recovery.isAuthFailing()).toBe(false); // successful recovery clears the marker
+    expect(result).toBe(false); // nothing to retry; the caller degrades gracefully
+    expect(storage.load()?.litellm_token).toBe("sk-stored-token"); // stored credentials intact
+    expect(recovery.isAuthFailing()).toBe(true); // health reports AI degraded
+    expect(recovery.isUpgradeNeeded()).toBe(true); // site flagged for admin re-authentication
   });
 
-  it("a second failure inside the window does not re-provision again", async () => {
-    const { recovery, calls } = makeRecovery([{ json: TRIAL }, { json: MODELS }]);
+  it("never requests replacement credentials and never touches the store", async () => {
+    // A provision attempt would build an AmazeeClient and POST for a new key.
+    // Guard both ends: fail if that endpoint is hit, and if the store is mutated.
+    const provisionSpy = vi
+      .spyOn(AmazeeClient.prototype, "provisionTrial")
+      .mockRejectedValue(new Error("provisionTrial must not be called on an auth failure"));
 
-    expect(await recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(true);
+    const storage = new TripwireStorage();
+    storage.store(STORED.litellm_token, STORED.litellm_api_url, STORED.region);
+    storage.wasStored = false; // reset after seeding
+    const cache = new InMemoryCacheDriver();
+    const recovery = new KeyExpiryRecovery(storage, cache);
 
-    // The mock queue is empty: another HTTP call would throw.
-    expect(await recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(false);
-    expect(calls()).toBe(2);
-  });
-
-  it("a failed re-provision leaves the failure marker and waits out the window", async () => {
-    const { recovery, calls } = makeRecovery([{ status: 500, json: { detail: "server error" } }]);
-
-    const first = await recovery.handleAuthFailure(new Error("code: expired_key"));
-    const second = await recovery.handleAuthFailure(new Error("code: expired_key"));
-
-    expect(first).toBe(false); // provisioning failure reports unrecovered
-    expect(second).toBe(false); // waits out the window, no API retry
-    expect(recovery.isAuthFailing()).toBe(true); // health keeps seeing the failure
-    expect(calls()).toBe(1); // exactly one provisioning attempt
-  });
-
-  it("an expired attempt window allows a fresh re-provision", async () => {
-    const { recovery, cache, calls } = makeRecovery(
-      [{ status: 500, json: {} }, { json: TRIAL }, { json: MODELS }],
-      { failureWindowSeconds: 600 },
-    );
-
-    expect(await recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(false);
-
-    // Age the attempt marker past the window (timestamps are compared in
-    // code, not via driver TTL — the in-memory driver ignores TTL).
-    cache.set(KeyExpiryRecovery.CACHE_KEY_REPROVISION_ATTEMPT, Date.now() / 1000 - 601, 600);
-
-    expect(await recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(true);
-    expect(calls()).toBe(3);
-  });
-
-  it("non-auth failures are ignored: no marker, no API call, storage untouched", async () => {
-    const { recovery, storage, calls } = makeRecovery([]);
-
-    const result = await recovery.handleAuthFailure(new Error(BUDGET_MESSAGE));
+    const result = recovery.handleAuthFailure(new Error("code: expired_key"));
 
     expect(result).toBe(false);
-    expect(recovery.isAuthFailing()).toBe(false);
-    expect(storage.load()?.litellm_token).toBe("sk-expired-token");
-    expect(calls()).toBe(0);
+    expect(provisionSpy).not.toHaveBeenCalled();
+    expect(storage.wasStored).toBe(false); // store() never called
+    expect(storage.wasCleared).toBe(false); // clear() never called
+    expect(recovery.isAuthFailing()).toBe(true);
+    expect(recovery.isUpgradeNeeded()).toBe(true);
   });
 
-  it("forwards the models-resolved callback to the provisioner", async () => {
-    const { recovery } = makeRecovery([{ json: TRIAL }, { json: MODELS }]);
+  it("keeps the markers set across repeated failures without touching storage", async () => {
+    const storage = new TripwireStorage();
+    storage.store(STORED.litellm_token, STORED.litellm_api_url, STORED.region);
+    storage.wasStored = false;
+    const recovery = new KeyExpiryRecovery(storage, new InMemoryCacheDriver());
 
-    let resolved: [string, string] | null = null;
-    await recovery.handleAuthFailure(new Error("code: expired_key"), (model, expansionModel) => {
-      resolved = [model, expansionModel];
-    });
+    expect(recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(false);
+    expect(recovery.handleAuthFailure(new Error("code: expired_key"))).toBe(false);
 
-    expect(resolved).toEqual(["claude-sonnet-4-5", "claude-haiku-4-5"]);
+    expect(recovery.isAuthFailing()).toBe(true);
+    expect(recovery.isUpgradeNeeded()).toBe(true);
+    expect(storage.wasStored).toBe(false);
+    expect(storage.wasCleared).toBe(false);
+  });
+
+  it("ignores non-auth failures: no markers, storage untouched", async () => {
+    const { recovery, storage } = makeRecovery();
+
+    const result = recovery.handleAuthFailure(new Error(BUDGET_MESSAGE));
+
+    expect(result).toBe(false);
+    expect(recovery.isAuthFailing()).toBe(false); // budget errors do not mark auth as failing
+    expect(recovery.isUpgradeNeeded()).toBe(false); // nor flag for re-authentication
+    expect(storage.load()?.litellm_token).toBe("sk-stored-token");
   });
 });
 
@@ -191,7 +168,7 @@ describe("KeyExpiryRecovery.handleAuthFailure", () => {
 
 describe("KeyExpiryRecovery markers", () => {
   it("recordAuthFailure is visible to isAuthFailing and isAuthFailingIn", () => {
-    const { recovery, cache } = makeRecovery([]);
+    const { recovery, cache } = makeRecovery();
 
     expect(recovery.isAuthFailing()).toBe(false);
     expect(KeyExpiryRecovery.isAuthFailingIn(cache)).toBe(false);
@@ -214,5 +191,17 @@ describe("KeyExpiryRecovery markers", () => {
     cache.set(KeyExpiryRecovery.CACHE_KEY_AUTH_FAILURE, false, 1);
 
     expect(KeyExpiryRecovery.isAuthFailingIn(cache)).toBe(false);
+  });
+
+  it("the upgrade-needed marker can be set and cleared", () => {
+    const { recovery } = makeRecovery();
+
+    expect(recovery.isUpgradeNeeded()).toBe(false);
+
+    recovery.flagUpgradeNeeded();
+    expect(recovery.isUpgradeNeeded()).toBe(true);
+
+    recovery.clearUpgradeNeeded();
+    expect(recovery.isUpgradeNeeded()).toBe(false); // a completed re-authentication clears the prompt
   });
 });

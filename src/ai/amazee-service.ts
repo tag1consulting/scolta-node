@@ -39,15 +39,16 @@ export class AmazeeAiService extends AiServiceAdapter {
   /**
    * Wire Amazee key-expiry recovery into the AI call path.
    *
-   * When set, an auth-class failure (expired/revoked trial key) on any AI
-   * call triggers a one-shot re-provision through the recovery's guarded path
-   * and, on success, a single retry with a client rebuilt from the fresh
-   * credentials. Without it, behavior is unchanged: the failure propagates.
+   * When set, an auth-class failure (the stored trial key is no longer
+   * accepted) on any AI call is recorded so `/health` reports AI as degraded
+   * and the site is flagged for admin re-authentication. It never retries —
+   * the original failure propagates and the request degrades gracefully.
+   * Without it, behavior is unchanged: the failure propagates untracked.
    *
    * Port of the PHP `AiServiceAdapter::setKeyExpiryRecovery()` — it lives on
    * this class rather than the base adapter because in this binding the
    * auto-provisioned path (Amazee storage and all) IS this class; recovery
-   * never applies to the explicit-key path, which {@link recoverFromAuthFailure}
+   * never applies to the explicit-key path, which {@link noteAuthFailure}
    * also guards against directly.
    */
   setKeyExpiryRecovery(recovery: KeyExpiryRecovery): void {
@@ -62,10 +63,7 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.message(systemPrompt, userMessage, maxTokens);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
-      if (await this.recoverFromAuthFailure(exc)) {
-        const client = await this.resolveClient();
-        return await client.message(systemPrompt, userMessage, maxTokens);
-      }
+      this.noteAuthFailure(exc);
       throw exc;
     }
   }
@@ -76,10 +74,7 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.conversation(systemPrompt, messages, maxTokens);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
-      if (await this.recoverFromAuthFailure(exc)) {
-        const client = await this.resolveClient();
-        return await client.conversation(systemPrompt, messages, maxTokens);
-      }
+      this.noteAuthFailure(exc);
       throw exc;
     }
   }
@@ -96,12 +91,7 @@ export class AmazeeAiService extends AiServiceAdapter {
       return await client.message(systemPrompt, userMessage, maxTokens, model);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
-      if (await this.recoverFromAuthFailure(exc)) {
-        const client = await this.resolveClient();
-        // Recompute: re-provisioning may have resolved fresh model names.
-        const model = operation === "expand_query" ? this.expansionModel() : undefined;
-        return await client.message(systemPrompt, userMessage, maxTokens, model);
-      }
+      this.noteAuthFailure(exc);
       throw exc;
     }
   }
@@ -109,37 +99,25 @@ export class AmazeeAiService extends AiServiceAdapter {
   // -- key-expiry recovery ----------------------------------------------------
 
   /**
-   * Attempt expired-key recovery and arrange a fresh client for one retry.
+   * Record an auth-class failure of the stored Amazee credentials.
    *
-   * Returns true only when recovery is wired, this service is on the
-   * auto-provisioned path (no explicit key — an explicit key failing auth is
-   * the user's key to fix, not Amazee's to replace), the failure is
-   * auth-class (never budget-exhaustion — {@link KeyExpiryRecovery} excludes
-   * it), the guarded re-provision succeeded, and fresh credentials are in
-   * storage. The caller then retries the original request exactly once; a
-   * failure of that retry propagates normally (the recovery's window guard
-   * prevents another re-provision attempt).
+   * When recovery is wired and this service is on the auto-provisioned path
+   * (no explicit key — an explicit key failing auth is the user's key to fix,
+   * not Amazee's), an auth-class failure (never budget-exhaustion —
+   * {@link KeyExpiryRecovery} excludes it) marks AI as degraded for `/health`
+   * and flags the site for admin re-authentication. It never retries: the
+   * caller's original error propagates and the request degrades gracefully
+   * (unexpanded query / no summary). A no-op when recovery is not wired.
    */
-  private async recoverFromAuthFailure(exc: unknown): Promise<boolean> {
+  private noteAuthFailure(exc: unknown): void {
     if (this.keyRecovery === null) {
-      return false;
+      return;
     }
     if (this.getConfig().ai_api_key) {
-      return false;
+      return;
     }
 
-    const recovered = await this.keyRecovery.handleAuthFailure(exc, (aiModel, aiExpansionModel) =>
-      this.storage.storeModels(aiModel, aiExpansionModel),
-    );
-    if (!recovered || this.storage.load() === null) {
-      return false;
-    }
-
-    // Drop the cached client so the retry resolves one built from the
-    // freshly stored credentials.
-    this.clientPromise = null;
-
-    return true;
+    this.keyRecovery.handleAuthFailure(exc);
   }
 
   // -- client resolution ----------------------------------------------------
