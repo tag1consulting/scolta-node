@@ -2,16 +2,7 @@
 
 ## [Unreleased]
 
-### Changed
-
-- **Improved handling of expired or revoked Amazee.ai credentials
-  (`src/ai/amazee/key-expiry-recovery.ts`, `src/ai/amazee/auto-provisioner.ts`,
-  `src/ai/amazee-service.ts`).** When the stored credentials are no longer
-  accepted, auth-class failures are now detected, AI degrades cleanly (never
-  silently) and the site is flagged for admin re-authentication (a new
-  persistent upgrade-needed marker adapters can read); AI health status more
-  accurately reflects credential state. The model-resolution self-heal is
-  unchanged.
+## [1.0.1] - 2026-07-10
 
 ### Added
 
@@ -34,6 +25,60 @@
   CI instead of shipping to the registry, printing exactly which path leaked
   and pointing at the filter. Precedent: the scolta-wp ~13 MB zip incident and
   the WP.org dist-cruft review flags.
+- **`scolta/adapter` subpath** — the helpers every JS framework adapter
+  (scolta-next/scolta-nuxt/scolta-astro) had duplicated file-for-file:
+  the static-output crawl (`exportPathToUrl` + `crawlStaticHtml`), the
+  vendored-asset copy (`resolveScoltaAssetsDir`/`copyDir`/`copyAssets`),
+  the `window.scolta` bootstrap (`buildWindowScolta`), and the default
+  AI-service wiring (`defaultAiService` + `endpointResultToResponse`).
+  Built as its own sequential tsup pass: a shared multi-entry build makes
+  rollup-dts split declarations into a chunk whose re-exports become
+  `declare const X: typeof X` values — downstream `ai.AiServiceLike`-style
+  type usage then fails to compile — and a parallel config array races one
+  pass's `clean` against the other's output.
+- **CI and tag-triggered releases.** `.github/workflows/ci.yml` (PRs + main;
+  Node 20/22 matrix; `npm ci`, build, test, typecheck, lint,
+  `check:publish`) and `.github/workflows/release.yml` (`v*.*.*` tags publish
+  to npm via OIDC Trusted Publishing — no long-lived token, automatic
+  provenance).
+- **Publish-shape gate.** `check:publish` runs publint +
+  `@arethetypeswrong/cli` against the packed tarball; part of the local and
+  CI gates.
+
+### Changed
+
+- **Improved handling of expired or revoked Amazee.ai credentials
+  (`src/ai/amazee/key-expiry-recovery.ts`, `src/ai/amazee/auto-provisioner.ts`,
+  `src/ai/amazee-service.ts`).** When the stored credentials are no longer
+  accepted, auth-class failures are now detected, AI degrades cleanly (never
+  silently) and the site is flagged for admin re-authentication (a new
+  persistent upgrade-needed marker adapters can read); AI health status more
+  accurately reflects credential state. The model-resolution self-heal is
+  unchanged.
+- Update the README status section: 1.0.0 is published to npm (the section
+  still said "In development").
+- **The release workflow now runs the publish-surface guards before
+  `npm publish` (`.github/workflows/release.yml`).** `check:publish` (publint +
+  are-the-types-wrong) and `check:pack` (pack-content allowlist + size cap)
+  previously gated only `ci.yml` on PRs, never the release workflow that
+  actually publishes — so a tagged commit could publish a tarball the PR gate
+  would have rejected. Both guards now run after `build`/`test` and before
+  `npm publish`, gating the published tarball the same way CI gates PRs.
+- **Pinned npm to `11.17.0` in the release workflow to match CI
+  (`.github/workflows/release.yml`).** The release job installed `npm@latest`
+  while `ci.yml` pins `npm@11.17.0` (the version that generated the fleet's
+  lockfiles); an unpinned npm could resolve or regenerate the tree differently
+  than CI validated. `11.17.0` still satisfies Trusted Publishing's `>= 11.5.1`
+  floor.
+- eslint moved to `recommendedTypeChecked` (projectService) so
+  `no-floating-promises`/`no-misused-promises` actually run;
+  `no-explicit-any` back at warn; all surfaced fallout fixed (typed
+  `PagefindModule` for the optional-peer dynamic import, `unknown`-narrowed
+  `JSON.parse` sites, Amazee error details no longer stringify as
+  `[object Object]`, `Number.isFinite` guard on the Node-version check).
+- vitest 1.6 -> 3.2.6 (dev-only; pulls vite 7 / patched esbuild for the
+  GHSA-67mh-4wv8-2f99 dev-server advisory).
+- package metadata: `repository`/`bugs` fields added.
 
 ### Fixed
 
@@ -56,7 +101,6 @@
   `buildClient()` degrades to the no-AI path (HTTP 200) when no model is
   resolvable instead of sending the dated default. A regression test drives the
   full store → failed-resolution → degrade → self-heal sequence.
-
 - **Re-vendored the browser bundle (`scolta.js`/`scolta.css`) from scolta-php
   `main`, picking up three client-side fixes that had not yet reached the Node
   binding.** scolta-php #217 stops the sub-word frequency guard from sizing its
@@ -72,7 +116,6 @@
   The SORT intent prompt block in `src/ai/intent-blocks.generated.ts` was
   re-synced byte-for-byte to the scolta-php #210 canonical text (the FILTER
   block was already in sync).
-
 - **Invalid-number config warnings are no longer permanently suppressed across
   config reloads (`src/config.ts`).** The `warnedInvalidNumbers` dedupe set was
   module-global and never reset, so it grew for the process lifetime: a config
@@ -81,31 +124,6 @@
   the run). The set is now reset at the start of each `ScoltaConfig.fromObject`
   call, so the warning still fires once per field within a load but re-warns on
   the next (re)load. A regression test asserts a second load re-warns.
-
-### Changed
-
-- Update the README status section: 1.0.0 is published to npm (the section
-  still said "In development").
-
-- **The release workflow now runs the publish-surface guards before
-  `npm publish` (`.github/workflows/release.yml`).** `check:publish` (publint +
-  are-the-types-wrong) and `check:pack` (pack-content allowlist + size cap)
-  previously gated only `ci.yml` on PRs, never the release workflow that
-  actually publishes — so a tagged commit could publish a tarball the PR gate
-  would have rejected. Both guards now run after `build`/`test` and before
-  `npm publish`, gating the published tarball the same way CI gates PRs.
-
-- **Pinned npm to `11.17.0` in the release workflow to match CI
-  (`.github/workflows/release.yml`).** The release job installed `npm@latest`
-  while `ci.yml` pins `npm@11.17.0` (the version that generated the fleet's
-  lockfiles); an unpinned npm could resolve or regenerate the tree differently
-  than CI validated. `11.17.0` still satisfies Trusted Publishing's `>= 11.5.1`
-  floor.
-
-## [1.0.1] - 2026-06-12
-
-### Fixed
-
 - **`require("scolta")` crashed at module load — the CJS half of the dual
   build has been unusable since 1.0.0.** Every `import.meta.url` in the CJS
   bundle compiled to a property of an empty object (`var import_meta = {}`),
@@ -209,40 +227,6 @@
   adds the PHP-parity `BudgetAwareProviderDecorator.isBudgetError()` static
   helper, now the single budget-error classification used by the decorator,
   `AmazeeAiService`, and `KeyExpiryRecovery`.
-
-### Added
-
-- **`scolta/adapter` subpath** — the helpers every JS framework adapter
-  (scolta-next/scolta-nuxt/scolta-astro) had duplicated file-for-file:
-  the static-output crawl (`exportPathToUrl` + `crawlStaticHtml`), the
-  vendored-asset copy (`resolveScoltaAssetsDir`/`copyDir`/`copyAssets`),
-  the `window.scolta` bootstrap (`buildWindowScolta`), and the default
-  AI-service wiring (`defaultAiService` + `endpointResultToResponse`).
-  Built as its own sequential tsup pass: a shared multi-entry build makes
-  rollup-dts split declarations into a chunk whose re-exports become
-  `declare const X: typeof X` values — downstream `ai.AiServiceLike`-style
-  type usage then fails to compile — and a parallel config array races one
-  pass's `clean` against the other's output.
-- **CI and tag-triggered releases.** `.github/workflows/ci.yml` (PRs + main;
-  Node 20/22 matrix; `npm ci`, build, test, typecheck, lint,
-  `check:publish`) and `.github/workflows/release.yml` (`v*.*.*` tags publish
-  to npm via OIDC Trusted Publishing — no long-lived token, automatic
-  provenance).
-- **Publish-shape gate.** `check:publish` runs publint +
-  `@arethetypeswrong/cli` against the packed tarball; part of the local and
-  CI gates.
-
-### Changed
-
-- eslint moved to `recommendedTypeChecked` (projectService) so
-  `no-floating-promises`/`no-misused-promises` actually run;
-  `no-explicit-any` back at warn; all surfaced fallout fixed (typed
-  `PagefindModule` for the optional-peer dynamic import, `unknown`-narrowed
-  `JSON.parse` sites, Amazee error details no longer stringify as
-  `[object Object]`, `Number.isFinite` guard on the Node-version check).
-- vitest 1.6 -> 3.2.6 (dev-only; pulls vite 7 / patched esbuild for the
-  GHSA-67mh-4wv8-2f99 dev-server advisory).
-- package metadata: `repository`/`bugs` fields added.
 
 ## [1.0.0] - 2026-06-09
 
