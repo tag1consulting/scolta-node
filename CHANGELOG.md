@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Optional `temperature` parameter on `AiClient.message()` and
+  `AiClient.conversation()` (`src/ai/client.ts`).** When provided it is emitted
+  as the `temperature` field on the request body for both the Anthropic and
+  OpenAI-compatible paths; when omitted the field is absent entirely so the
+  provider default applies and existing request bodies are unchanged. The guard
+  is `temperature !== undefined`, so a `temperature` of `0` is sent verbatim.
+  `AiServiceAdapter.messageForOperation()` now pins `temperature` to `0` for the
+  `expand_query` operation only, giving deterministic query expansion; summarize
+  and follow_up stay on the provider default. Ported from
+  tag1consulting/scolta-php#230.
+
 ## [1.0.1] - 2026-07-10
 
 ### Added

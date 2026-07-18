@@ -107,6 +107,55 @@ describe("AiServiceAdapter framework path", () => {
   });
 });
 
+// -- messageForOperation temperature pinning --------------------------------
+
+/** Records the arguments of the last message() call. */
+class RecordingClient extends AiClient {
+  lastModel: string | undefined = undefined;
+  lastTemperature: number | undefined = undefined;
+  constructor() {
+    super({});
+  }
+  override async message(
+    _systemPrompt: string,
+    _userMessage: string,
+    _maxTokens?: number,
+    model?: string,
+    temperature?: number,
+  ): Promise<string> {
+    this.lastModel = model;
+    this.lastTemperature = temperature;
+    return "recorded";
+  }
+}
+
+class RecordingAdapter extends AiServiceAdapter {
+  readonly recorder = new RecordingClient();
+  protected override getClient(): AiClient {
+    return this.recorder;
+  }
+}
+
+describe("AiServiceAdapter messageForOperation temperature", () => {
+  it("pins temperature 0 for expand_query", async () => {
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    await adapter.messageForOperation("expand_query", "sys", "user");
+    expect(adapter.recorder.lastTemperature).toBe(0);
+  });
+
+  it("leaves temperature undefined for summarize", async () => {
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    await adapter.messageForOperation("summarize", "sys", "user");
+    expect(adapter.recorder.lastTemperature).toBeUndefined();
+  });
+
+  it("leaves temperature undefined for follow_up", async () => {
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    await adapter.messageForOperation("follow_up", "sys", "user");
+    expect(adapter.recorder.lastTemperature).toBeUndefined();
+  });
+});
+
 // -- handlePossibleBudgetException hook -------------------------------------
 
 class ThrowingClient extends AiClient {
