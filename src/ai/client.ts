@@ -108,8 +108,15 @@ export class AiClient {
     userMessage: string,
     maxTokens = 1024,
     model?: string,
+    temperature?: number,
   ): Promise<string> {
-    return this.sendRequest(systemPrompt, [{ role: "user", content: userMessage }], maxTokens, model);
+    return this.sendRequest(
+      systemPrompt,
+      [{ role: "user", content: userMessage }],
+      maxTokens,
+      model,
+      temperature,
+    );
   }
 
   /** Send a multi-turn conversation and return the response text. */
@@ -118,8 +125,9 @@ export class AiClient {
     messages: ChatMessage[],
     maxTokens = 1024,
     model?: string,
+    temperature?: number,
   ): Promise<string> {
-    return this.sendRequest(systemPrompt, messages, maxTokens, model);
+    return this.sendRequest(systemPrompt, messages, maxTokens, model, temperature);
   }
 
   private async sendRequest(
@@ -127,6 +135,7 @@ export class AiClient {
     messages: ChatMessage[],
     maxTokens: number,
     model?: string,
+    temperature?: number,
   ): Promise<string> {
     if (!this.apiKey) {
       throw new ApiKeyMissingError(
@@ -137,9 +146,9 @@ export class AiClient {
     const useModel = model || this.model;
 
     if (this.provider === "openai") {
-      return this.sendOpenai(systemPrompt, messages, maxTokens, useModel);
+      return this.sendOpenai(systemPrompt, messages, maxTokens, useModel, temperature);
     }
-    return this.sendAnthropic(systemPrompt, messages, maxTokens, useModel);
+    return this.sendAnthropic(systemPrompt, messages, maxTokens, useModel, temperature);
   }
 
   private async sendAnthropic(
@@ -147,6 +156,7 @@ export class AiClient {
     messages: ChatMessage[],
     maxTokens: number,
     model: string,
+    temperature?: number,
   ): Promise<string> {
     const response = await this.post(this.baseUrl, {
       "x-api-key": this.apiKey,
@@ -157,6 +167,9 @@ export class AiClient {
       max_tokens: maxTokens,
       system: systemPrompt,
       messages,
+      // Omit temperature entirely when undefined so the provider default
+      // applies; `0` is a valid value, so guard on `!== undefined`.
+      ...(temperature !== undefined ? { temperature } : {}),
     });
     const data = await this.parseJson(response);
     return extractAnthropicText(data);
@@ -167,6 +180,7 @@ export class AiClient {
     messages: ChatMessage[],
     maxTokens: number,
     model: string,
+    temperature?: number,
   ): Promise<string> {
     const allMessages = [{ role: "system", content: systemPrompt }, ...messages];
     const response = await this.post(this.baseUrl, {
@@ -176,6 +190,9 @@ export class AiClient {
       model,
       max_tokens: maxTokens,
       messages: allMessages,
+      // Omit temperature entirely when undefined so the provider default
+      // applies; `0` is a valid value, so guard on `!== undefined`.
+      ...(temperature !== undefined ? { temperature } : {}),
     });
     const data = await this.parseJson(response);
     return extractOpenaiText(data);

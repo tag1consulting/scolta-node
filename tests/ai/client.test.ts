@@ -225,4 +225,49 @@ describe("AiClient", () => {
     expect(err).not.toBeInstanceOf(AiTimeoutError);
     expect((err as Error).message).toContain("request failed");
   });
+
+  // -- temperature pass-through ---------------------------------------------
+  // `0` is a valid, load-bearing value (a falsiness bug would drop it), so the
+  // client must emit `temperature: 0` when given and omit the key entirely when
+  // the parameter is left off, so the provider default applies.
+
+  it("anthropic body carries temperature 0 when passed", async () => {
+    const { client: c, captured } = client({ api_key: "k" }, () => ({
+      json: { content: [{ text: "ok" }] },
+    }));
+    await c.message("s", "u", 256, undefined, 0);
+    expect(captured.body.temperature).toBe(0);
+  });
+
+  it("openai body carries temperature 0 when passed", async () => {
+    const { client: c, captured } = client({ provider: "openai", api_key: "k" }, () => ({
+      json: { choices: [{ message: { content: "ok" } }] },
+    }));
+    await c.message("s", "u", 256, undefined, 0);
+    expect(captured.body.temperature).toBe(0);
+  });
+
+  it("conversation body carries temperature 0 when passed", async () => {
+    const { client: c, captured } = client({ api_key: "k" }, () => ({
+      json: { content: [{ text: "ok" }] },
+    }));
+    await c.conversation("s", [{ role: "user", content: "u" }], 256, undefined, 0);
+    expect(captured.body.temperature).toBe(0);
+  });
+
+  it("anthropic body omits temperature key when not passed", async () => {
+    const { client: c, captured } = client({ api_key: "k" }, () => ({
+      json: { content: [{ text: "ok" }] },
+    }));
+    await c.message("s", "u");
+    expect("temperature" in captured.body).toBe(false);
+  });
+
+  it("openai body omits temperature key when not passed", async () => {
+    const { client: c, captured } = client({ provider: "openai", api_key: "k" }, () => ({
+      json: { choices: [{ message: { content: "ok" } }] },
+    }));
+    await c.message("s", "u");
+    expect("temperature" in captured.body).toBe(false);
+  });
 });

@@ -66,7 +66,11 @@ export class AiServiceAdapter {
         operation === "expand_query" && this.config.ai_expansion_model !== ""
           ? this.config.ai_expansion_model
           : undefined;
-      return await this.getClient().message(systemPrompt, userMessage, maxTokens, model);
+      // Pin temperature 0 for query expansion so the same query yields the same
+      // terms on every request; summarize and follow_up stay on the provider
+      // default (undefined -> temperature field omitted).
+      const temperature = operation === "expand_query" ? 0 : undefined;
+      return await this.getClient().message(systemPrompt, userMessage, maxTokens, model, temperature);
     } catch (exc) {
       this.handlePossibleBudgetException(exc);
       throw exc;
