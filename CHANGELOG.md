@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php:
+  Pagefind index chunks are now preloaded while the user types**
+  ([tag1consulting/scolta-php#232](https://github.com/tag1consulting/scolta-php/pull/232),
+  issue [#191](https://github.com/tag1consulting/scolta-php/issues/191)).
+  Scolta runs no search until Enter or the search button, so every submitted
+  search also paid for fetching the alphabetical index chunk(s) for the typed
+  term. The search input now hands the term to `pagefind.preload()` — the
+  chunk-resolution half of a search, which bails out before scoring — so the
+  search that fires on submit finds the chunk already resolved. Guarded by a
+  150 ms trailing debounce, a 2-character floor, a repeat-term skip, and a
+  feature-detect on `preload` (index builds from Pagefind releases that predate
+  it are unaffected); failures are swallowed, so a cache warm can never break
+  the search box. Copied byte-identically from the canonical source; no
+  Node-side code changed.
+
 ### Added
 
 - **Optional `temperature` parameter on `AiClient.message()` and
