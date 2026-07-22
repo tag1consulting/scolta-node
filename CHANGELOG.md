@@ -32,6 +32,9 @@
   and follow_up stay on the provider default. Ported from
   tag1consulting/scolta-php#230.
 
+### Fixed
+- **Prompt templates re-synced from scolta-core (`src/ai/prompts.generated.ts`).** Picks up expand_query rule 16 (NAMED ENTITY / EVENT → DEFINING DETAILS), which stops identifier/proper-noun queries from being expanded into terms that all keep the entity anchor and therefore match nothing, and the rewritten summarize/follow_up grounding rules, which forbid the model from claiming the collection lacks content it cannot see. Byte-identity with scolta-core is enforced by `tests/ai/prompt-identity.test.ts`.
+
 ## [1.0.1] - 2026-07-10
 
 ### Added
