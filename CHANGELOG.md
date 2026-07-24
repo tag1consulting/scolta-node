@@ -4,6 +4,22 @@
 
 ### Changed
 
+- **Re-vendored the browser bundle (`assets/js/scolta.js`) and the bundled
+  scolta-core WASM from scolta-php: specificity-weighted ranking, co-occurrence
+  ranking, and the non-seeding-load fix**
+  ([tag1consulting/scolta-php#237](https://github.com/tag1consulting/scolta-php/pull/237),
+  [#238](https://github.com/tag1consulting/scolta-php/pull/238),
+  issue [#156](https://github.com/tag1consulting/scolta-php/issues/156)).
+  Each partial-match sub-query is now weighted by how rare its term is in the
+  corpus, so a match on a rare intent-bearing term outranks a match on a
+  ubiquitous one. On top of that, a document that agrees with several query and
+  expansion terms now outranks one matching a single strong term, and the
+  co-occurrence path no longer loads full documents for non-seeding terms (typed
+  words and agreement-only phrase sub-words) — their agreement is decided from
+  result ids and the seeded documents are joined by Pagefind entry id, which
+  removes the discarded loads that had inflated the per-query loaded-document
+  count. The assets are a verbatim copy of the canonical scolta-php source; no
+  behaviour is implemented in this package.
 - **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php:
   Pagefind index chunks are now preloaded while the user types**
   ([tag1consulting/scolta-php#232](https://github.com/tag1consulting/scolta-php/pull/232),
