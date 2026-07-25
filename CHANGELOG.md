@@ -10,8 +10,10 @@
   by default (dropping a filter group whose values are all zero); an active
   value stays visible so it can be unchecked. A site can restore the prior
   show-disabled behavior by setting `window.scolta.hideEmptyFacets = false`.
-  This package ships the bundle only and inherits the JS default; no Node-side
-  config surface is added. Copied verbatim via `scripts/vendor-assets.mjs`.
+  Copied verbatim via `scripts/vendor-assets.mjs`. The Node-side config surface
+  for the opt-out is added below under **Added**; when this entry was first
+  written the bundle shipped without one, so the only way to reach the opt-out
+  was to set the global by hand.
 - **Re-vendored the browser bundle (`assets/js/scolta.js`) and the bundled
   scolta-core WASM from scolta-php: specificity-weighted ranking, co-occurrence
   ranking, and the non-seeding-load fix**
@@ -45,6 +47,49 @@
 
 ### Added
 
+- **`hide_empty_facets` config field, so the facet-visibility opt-out is
+  reachable from Node (`src/config.ts`, `docs/CONFIG_REFERENCE.md`).** The
+  vendored bundle has read `instanceConfig.hideEmptyFacets` since it was
+  re-vendored, but this package emitted no such key, and the bundle treats an
+  absent key as "hide" (only a literal `false` disables it), so the opt-out was
+  unreachable through config: a caller had to set `window.scolta.hideEmptyFacets`
+  by hand after the fact. New `hide_empty_facets` field (bool, default `true`)
+  with a `FIELD_KINDS` entry, emitted top-level from `toBrowserConfig()` and not
+  nested under `scoring`, matching scolta-php's key order. The `FIELD_KINDS`
+  entry is load-bearing, not decorative: `fromObject()` gates incoming keys
+  against that map and silently drops anything absent from it, so a class field
+  without an entry would be settable-looking and inert.
+- **Eight missing scoring tunables, closing the emitter gap against the browser
+  (`src/config.ts`, `docs/CONFIG_REFERENCE.md`).** `toJsScoringConfig()` emitted
+  32 keys while `scolta.js` reads 40. The eight absent fields were the six
+  specificity knobs (`specificity_weighting` `true`, `specificity_floor` `0.15`,
+  `specificity_strong_match` `0.55`, `specificity_cooccurrence` `0.9`,
+  `specificity_agreement_gate` `0.45`, `specificity_agreement_decay` `1.0`) and
+  the two filter-hint recall-guard knobs (`filter_hint_min_results` `5`,
+  `filter_hint_min_ratio` `0.1`). All eight could therefore only ever take their
+  hardcoded JS fallbacks. Defaults are byte-equal to those fallbacks, so this is
+  a pure reachability change with no ranking movement;
+  `specificity_cooccurrence: 0` reproduces the prior maximum-only merge exactly.
+  String coercion comes free from `coerce()` once the `FIELD_KINDS` entry exists,
+  including PHP falsy semantics for the boolean (only `""` and `"0"` are false).
+- **A browser-config parity guard, so a key the bundle reads can no longer be
+  settable from nowhere (`tests/browser-config-parity.test.ts`).** Root cause of
+  all nine gaps above: nothing asserted that the config this package emits covers
+  what `scolta.js` reads off it, so a browser-side read could exist with no
+  corresponding config field and CI stayed green, because an unsettable key
+  silently falls back to its hardcoded JS default and the feature merely appears
+  not to work. The new test parses the vendored `assets/js/scolta.js` for every
+  key the browser consumes (top-level `instanceConfig.<key>` reads, the `scoring`
+  sub-keys in the config return literals, the `endpoints` sub-keys) and diffs that
+  set against `toBrowserConfig()` in both directions, recursing one level so a
+  missing `scoring` or `endpoints` sub-key cannot hide behind a passing top-level
+  check. Four forward-allowlisted keys (`currentLanguage`, `allowedLinkDomains`,
+  `disclaimer`, `priority_pages`) each carry their justification as a code
+  comment; the reverse allowlist is empty, as this package emits nothing the
+  browser does not read. Three tripwire assertions on the extracted counts run
+  before any diff, so a reformat of the bundle that breaks the extraction fails
+  loudly instead of passing while asserting nothing. Ported from scolta-php's
+  reference implementation.
 - **Optional `temperature` parameter on `AiClient.message()` and
   `AiClient.conversation()` (`src/ai/client.ts`).** When provided it is emitted
   as the `temperature` field on the request body for both the Anthropic and
