@@ -57,6 +57,39 @@
   tag1consulting/scolta-php#230.
 
 ### Fixed
+
+- **Prompt templates re-synced from scolta-core: `expand_query` rule 17
+  (`src/ai/prompts.generated.ts`).** Picks up rule 17 (QUALITY / EXPERIENCE →
+  CONCRETE INSTANCES), which stops a query naming a feeling or judgment rather
+  than a topic ("scary moment", "inspiring story") from being expanded into
+  synonyms of the adjective ("frightening experience", "terrifying incident").
+  Authors narrate a tense episode by describing the concrete thing that went
+  wrong, the malfunction or the alarm or the aborted attempt, and almost never
+  label it "scary", so the synonym expansion shared no vocabulary with the pages
+  that answer the query. The rule expands such a query into the concrete events,
+  systems, or situations that embody the quality in prose and reconciles the
+  preamble term cap ("up to 6 concrete instances"); rule 15 still bounds it,
+  with its fallback held concrete so it cannot license the genre labels the rule
+  bans. The rule covers every valence, not only things that went wrong: the
+  funny and inspiring cases are named explicitly and their vocabulary ("amusing
+  story", "uplifting narrative") banned, after the model was observed restating
+  the adjective on exactly those queries; its examples are marked as
+  illustrations rather than a term bank, after it was observed emitting them
+  verbatim for an unrelated corpus.
+  Byte-identity with scolta-core is enforced by
+  `tests/ai/prompt-identity.test.ts`.
+- **The prompt-identity parity gate no longer skips itself in CI
+  (`.github/workflows/ci.yml`, `tests/ai/prompt-identity.test.ts`).** The gate
+  resolves scolta-core through `SCOLTA_CORE_PROMPTS`, falling back to an
+  umbrella-checkout sibling path. CI set neither: it never checked out
+  scolta-core and never set the variable, so on every runner the sibling path
+  was absent, `shouldSkip` was true, and all three identity cases skipped while
+  the job reported green. This package's prompt copy had therefore never been
+  gated in CI. The `test` job now checks out `tag1consulting/scolta-core` at
+  `main` and points the variable at it, mirroring scolta-php's workflow, and an
+  unreachable canonical source is now a failure under CI rather than a skip. A
+  skip stays legitimate off CI, where a published-package checkout has no
+  scolta-core sibling.
 - **Prompt templates re-synced from scolta-core (`src/ai/prompts.generated.ts`).** Picks up expand_query rule 16 (NAMED ENTITY / EVENT → DEFINING DETAILS), which stops identifier/proper-noun queries from being expanded into terms that all keep the entity anchor and therefore match nothing, and the rewritten summarize/follow_up grounding rules, which forbid the model from claiming the collection lacks content it cannot see. Byte-identity with scolta-core is enforced by `tests/ai/prompt-identity.test.ts`.
 
 ## [1.0.1] - 2026-07-10

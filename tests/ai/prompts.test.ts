@@ -43,4 +43,15 @@ describe("prompts", () => {
     expect(template).toContain("UNRECOGNIZED OR UNVERIFIABLE NAMED ENTITIES");
     expect(template).toContain("do NOT manufacture");
   });
+
+  it("expand_query decomposes a quality or experience into concrete instances", () => {
+    const template = prompts.getTemplate(prompts.EXPAND_QUERY);
+    expect(template).toContain("17. QUALITY / EXPERIENCE → CONCRETE INSTANCES");
+    expect(template).toContain("not synonyms of the adjective");
+  });
+
+  it("expand_query reconciles the term cap with rule 17", () => {
+    const template = prompts.getTemplate(prompts.EXPAND_QUERY);
+    expect(template).toContain("up to 6 concrete instances");
+  });
 });

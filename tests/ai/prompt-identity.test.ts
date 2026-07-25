@@ -17,7 +17,9 @@
  *
  * Path resolution: SCOLTA_CORE_PROMPTS env override, else the umbrella-checkout
  * sibling path. env set but file missing → FAIL; env unset and sibling missing →
- * SKIP (a published-package checkout legitimately has no scolta-core).
+ * FAIL under CI, SKIP otherwise (a published-package checkout legitimately has
+ * no scolta-core, but a CI run that cannot reach it is a broken gate, not an
+ * absent one: it would report green while the prompt copy silently drifts).
  */
 
 import * as fs from "node:fs";
@@ -75,14 +77,26 @@ function extractRustRawConst(source: string, constName: string): string {
 const resolvedPath = corePromptsPath();
 const fileExists = fs.existsSync(resolvedPath);
 const explicit = Boolean(process.env["SCOLTA_CORE_PROMPTS"]);
-const shouldSkip = !fileExists && !explicit;
+// A parity gate that skips itself is worse than no gate at all, because the job
+// still reports green. Under CI the canonical source MUST be reachable, so an
+// unreachable one is a failure; a skip is only legitimate off CI, where a
+// published-package checkout has no scolta-core sibling to compare against.
+const isCI = Boolean(process.env["CI"]);
+const shouldSkip = !fileExists && !explicit && !isCI;
 
 describe("prompt-text identity vs scolta-core", () => {
   for (const [tsName, rustConst] of Object.entries(TEMPLATE_TO_CONST)) {
     it.skipIf(shouldSkip)(`${tsName} matches ${rustConst}`, () => {
       if (!fileExists) {
-        // explicit env set but file missing → real misconfiguration, fail loudly.
-        expect.fail(`SCOLTA_CORE_PROMPTS is set but no file exists at ${resolvedPath}`);
+        // Either the env override points nowhere, or we are in CI without a
+        // scolta-core checkout. Both are real misconfigurations: fail loudly.
+        expect.fail(
+          explicit
+            ? `SCOLTA_CORE_PROMPTS is set but no file exists at ${resolvedPath}`
+            : `scolta-core prompts not found at ${resolvedPath}. CI must check out ` +
+                `tag1consulting/scolta-core and set SCOLTA_CORE_PROMPTS; this gate ` +
+                `must never skip in CI.`,
+        );
       }
       const source = fs.readFileSync(resolvedPath, "utf-8");
       const coreBase = stripDynamicAnchorsLine(extractRustRawConst(source, rustConst));
