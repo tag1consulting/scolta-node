@@ -8,12 +8,23 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Point the prompt-text identity gate at the scolta-core source checked out
+      # below, so prompt-identity.test.ts actually runs in CI instead of skipping.
+      SCOLTA_CORE_PROMPTS: ${{ github.workspace }}/scolta-core-src/src/prompts.rs
     strategy:
       matrix:
         node: [20, 22]
     name: test (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: tag1consulting/scolta-core
+          ref: main
+          path: scolta-core-src
+
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
