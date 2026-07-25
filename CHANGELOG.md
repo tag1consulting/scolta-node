@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php: `hideEmptyFacets` facet-visibility opt-out**
+  ([tag1consulting/scolta-php#239](https://github.com/tag1consulting/scolta-php/pull/239)).
+  The bundle now hides a facet value whose count is zero for the current query
+  by default (dropping a filter group whose values are all zero); an active
+  value stays visible so it can be unchecked. A site can restore the prior
+  show-disabled behavior by setting `window.scolta.hideEmptyFacets = false`.
+  This package ships the bundle only and inherits the JS default; no Node-side
+  config surface is added. Copied verbatim via `scripts/vendor-assets.mjs`.
 - **Re-vendored the browser bundle (`assets/js/scolta.js`) and the bundled
   scolta-core WASM from scolta-php: specificity-weighted ranking, co-occurrence
   ranking, and the non-seeding-load fix**
