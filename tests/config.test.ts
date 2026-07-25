@@ -146,4 +146,89 @@ describe("ScoltaConfig", () => {
     expect(c.title_match_boost).toBe(2.5);
     expect(c.results_per_page).toBe(12);
   });
+
+  it("hide_empty_facets defaults to true", () => {
+    expect(new ScoltaConfig().hide_empty_facets).toBe(true);
+  });
+
+  it("hide_empty_facets opt-out maps from a boolean", () => {
+    expect(ScoltaConfig.fromObject({ hide_empty_facets: false }).hide_empty_facets).toBe(false);
+  });
+
+  it("hide_empty_facets opt-out maps from the string '0' (PHP falsy semantics)", () => {
+    expect(ScoltaConfig.fromObject({ hide_empty_facets: "0" }).hide_empty_facets).toBe(false);
+    expect(ScoltaConfig.fromObject({ hide_empty_facets: "" }).hide_empty_facets).toBe(false);
+    // Only "" and "0" are falsy, matching PHP.
+    expect(ScoltaConfig.fromObject({ hide_empty_facets: "false" }).hide_empty_facets).toBe(true);
+  });
+
+  it("hide_empty_facets stays true when the key is absent", () => {
+    expect(ScoltaConfig.fromObject({ site_name: "x" }).hide_empty_facets).toBe(true);
+  });
+
+  it("to_browser_config carries hideEmptyFacets top-level, not under scoring", () => {
+    const b = new ScoltaConfig().toBrowserConfig();
+    expect(b["hideEmptyFacets"]).toBe(true);
+    expect("hideEmptyFacets" in (b["scoring"] as Record<string, unknown>)).toBe(false);
+  });
+
+  it("to_browser_config carries the hideEmptyFacets opt-out through as false", () => {
+    const b = ScoltaConfig.fromObject({ hide_empty_facets: false }).toBrowserConfig();
+    expect(b["hideEmptyFacets"]).toBe(false);
+  });
+
+  it("specificity and filter-hint scoring defaults match the scolta.js fallbacks", () => {
+    const js = new ScoltaConfig().toJsScoringConfig();
+    expect(js["SPECIFICITY_WEIGHTING"]).toBe(true);
+    expect(js["SPECIFICITY_FLOOR"]).toBe(0.15);
+    expect(js["SPECIFICITY_STRONG_MATCH"]).toBe(0.55);
+    expect(js["SPECIFICITY_COOCCURRENCE"]).toBe(0.9);
+    expect(js["SPECIFICITY_AGREEMENT_GATE"]).toBe(0.45);
+    expect(js["SPECIFICITY_AGREEMENT_DECAY"]).toBe(1.0);
+    expect(js["FILTER_HINT_MIN_RESULTS"]).toBe(5);
+    expect(js["FILTER_HINT_MIN_RATIO"]).toBe(0.1);
+  });
+
+  it("specificity and filter-hint keys map from snake_case input", () => {
+    const js = ScoltaConfig.fromObject({
+      specificity_weighting: false,
+      specificity_floor: 0.05,
+      specificity_strong_match: 0.7,
+      specificity_cooccurrence: 1.4,
+      specificity_agreement_gate: 0.3,
+      specificity_agreement_decay: 0.65,
+      filter_hint_min_results: 12,
+      filter_hint_min_ratio: 0.25,
+    }).toJsScoringConfig();
+    expect(js["SPECIFICITY_WEIGHTING"]).toBe(false);
+    expect(js["SPECIFICITY_FLOOR"]).toBe(0.05);
+    expect(js["SPECIFICITY_STRONG_MATCH"]).toBe(0.7);
+    expect(js["SPECIFICITY_COOCCURRENCE"]).toBe(1.4);
+    expect(js["SPECIFICITY_AGREEMENT_GATE"]).toBe(0.3);
+    expect(js["SPECIFICITY_AGREEMENT_DECAY"]).toBe(0.65);
+    expect(js["FILTER_HINT_MIN_RESULTS"]).toBe(12);
+    expect(js["FILTER_HINT_MIN_RATIO"]).toBe(0.25);
+  });
+
+  it("specificity_cooccurrence accepts 0 to restore the maximum-only merge", () => {
+    expect(ScoltaConfig.fromObject({ specificity_cooccurrence: 0 }).specificity_cooccurrence).toBe(0);
+  });
+
+  it("specificity and filter-hint keys coerce from strings", () => {
+    const c = ScoltaConfig.fromObject({
+      specificity_weighting: "0",
+      specificity_cooccurrence: "0.75",
+      specificity_agreement_gate: "0.5",
+      specificity_agreement_decay: "0.8",
+      filter_hint_min_results: "12.9",
+      filter_hint_min_ratio: "0.25",
+    });
+    expect(c.specificity_weighting).toBe(false);
+    expect(c.specificity_cooccurrence).toBe(0.75);
+    expect(c.specificity_agreement_gate).toBe(0.5);
+    expect(c.specificity_agreement_decay).toBe(0.8);
+    // int kind truncates, like the other int fields.
+    expect(c.filter_hint_min_results).toBe(12);
+    expect(c.filter_hint_min_ratio).toBe(0.25);
+  });
 });

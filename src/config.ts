@@ -142,6 +142,14 @@ export const FIELD_KINDS: Record<string, FieldKind> = {
   expand_subword_deny_list: "list",
   expansion_combine_mode: "string",
   expansion_per_term_top_k: "int",
+  specificity_weighting: "bool",
+  specificity_floor: "float",
+  specificity_strong_match: "float",
+  specificity_cooccurrence: "float",
+  specificity_agreement_gate: "float",
+  specificity_agreement_decay: "float",
+  filter_hint_min_results: "int",
+  filter_hint_min_ratio: "float",
   language: "string",
   custom_stop_words: "list",
   recency_strategy: "string",
@@ -165,6 +173,7 @@ export const FIELD_KINDS: Record<string, FieldKind> = {
   sortable_field_descriptions: "dict",
   filter_fields: "list",
   filter_field_descriptions: "dict",
+  hide_empty_facets: "bool",
   preset: "string",
 };
 
@@ -224,6 +233,18 @@ export class ScoltaConfig {
   /** Locked at 3 — internal constant, never settable from config. */
   expansion_per_term_top_k = 3;
 
+  // -- Scoring: Specificity weighting and co-occurrence agreement --
+  specificity_weighting = true;
+  specificity_floor = 0.15;
+  specificity_strong_match = 0.55;
+  specificity_cooccurrence = 0.9;
+  specificity_agreement_gate = 0.45;
+  specificity_agreement_decay = 1.0;
+
+  // -- Scoring: Filter-hint recall guard --
+  filter_hint_min_results = 5;
+  filter_hint_min_ratio = 0.1;
+
   // -- Scoring: Language and stop words --
   language = "en";
   custom_stop_words: string[] = [];
@@ -262,6 +283,7 @@ export class ScoltaConfig {
   sortable_field_descriptions: Record<string, string> = {};
   filter_fields: string[] = [];
   filter_field_descriptions: Record<string, string> = {};
+  hide_empty_facets = true;
 
   // -- Scoring preset --
   preset = "";
@@ -377,6 +399,14 @@ export class ScoltaConfig {
       CROSS_LIST_BONUS: this.cross_list_bonus,
       EXPAND_SUBWORD_MAX_FREQ: this.expand_subword_max_frequency,
       EXPAND_SUBWORD_DENYLIST: this.expand_subword_deny_list,
+      SPECIFICITY_WEIGHTING: this.specificity_weighting,
+      SPECIFICITY_FLOOR: this.specificity_floor,
+      SPECIFICITY_STRONG_MATCH: this.specificity_strong_match,
+      SPECIFICITY_COOCCURRENCE: this.specificity_cooccurrence,
+      SPECIFICITY_AGREEMENT_GATE: this.specificity_agreement_gate,
+      SPECIFICITY_AGREEMENT_DECAY: this.specificity_agreement_decay,
+      FILTER_HINT_MIN_RESULTS: this.filter_hint_min_results,
+      FILTER_HINT_MIN_RATIO: this.filter_hint_min_ratio,
       EXPANSION_COMBINE_MODE: this.expansion_combine_mode,
       EXPANSION_PER_TERM_TOP_K: this.expansion_per_term_top_k,
       AI_MAX_FOLLOWUPS: this.max_follow_ups,
@@ -402,6 +432,7 @@ export class ScoltaConfig {
       siteName: this.site_name,
       pagefindPath: this.pagefind_index_path + "/pagefind.js",
       filterFieldDescriptions: this.filter_field_descriptions,
+      hideEmptyFacets: this.hide_empty_facets,
     };
   }
 
