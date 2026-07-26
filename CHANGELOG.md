@@ -3,6 +3,32 @@
 ## [Unreleased]
 
 ### Changed
+- **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php: Scolta owns its facet index, so every search stops paying Pagefind's filter counter**
+  ([tag1consulting/scolta-php#245](https://github.com/tag1consulting/scolta-php/pull/245)).
+  **Adopting this requires a full search index rebuild**, so the index gains its
+  new `scolta.facets` file. Until then facets keep working exactly as before,
+  just as slowly: the bundle detects the missing artifact and falls back to
+  `pagefind.filters()`, logging a console warning that names the rebuild as the
+  fix. Root cause is upstream, in Pagefind 1.5's `SearchIndex::get_filters`,
+  which counts by scanning the matched-result set linearly for every
+  `(value, page)` posting in every **loaded** filter chunk, and is called twice
+  per search — so once any chunk is loaded, every later search costs
+  `matched results x loaded postings`, with no unload path short of
+  `pagefind.destroy()`. Chunks were loaded two ways: `pagefind.filters()` at
+  init loaded all of them, and naming a dimension in a search's filter object
+  lazily fetched that dimension's chunk, so the first facet click made the cost
+  permanent for the life of the page. The cost tracks postings, not distinct
+  filter values: on a 109,308-page corpus a 440-value dimension carrying
+  389,545 postings cost 2,478 ms while a 19-value one carrying 491,074 postings
+  cost 3,014 ms. The bundle now reads the facet value lists, their totals and
+  the per-query counts from `scolta.facets`, and applies the user's facet
+  selection itself rather than handing it to Pagefind. Counts are computed over
+  the full matched set and were validated against Pagefind's own output with
+  zero mismatches across all 3,970 values in all ten dimensions. Keystroke to
+  first results on that corpus: `photosynthesis` 525 -> 123 ms, `math`
+  17,025 -> 228 ms, a six-word OR-fallback query 71,372 -> 1,058 ms, with
+  result counts and every rendered facet count unchanged. Copied verbatim via
+  `scripts/vendor-assets.mjs`; no Node-side code changed.
 - **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php: every query stopped running its Pagefind search twice, and the result list no longer waits for the facet counts ([scolta-php#244](https://github.com/tag1consulting/scolta-php/pull/244)).** Two independent defects in the bundle, measured on a production-size Pagefind index (109,308 indexed pages, 3,970 distinct filter values across 10 dimensions). **(1)** The facet-count pass derives its filters by keeping only the structural dimensions out of the active ones, so with no user-facing facet applied — the common case — it issued a search byte-identical to the primary one, and on the OR-fallback path it re-ran a per-term search for every term the result path had just searched. That doubled the cost of every query, because once Pagefind's filter chunks are loaded every search also computes per-value counts across every distinct filter value (roughly 1.45 ms per matched result). Identical searches are now memoized for the duration of one search cycle, keyed on the query plus the resolved Pagefind options, so a search whose scope genuinely differs still runs and the facet counts are unchanged. **(2)** The results were rendered only after that second search returned (for the query `math`: finished in memory at 24,558 ms, painted at 35,626 ms). They now paint as soon as they are ready and the filter panel is re-rendered when the counts land, behind a staleness re-check so a superseded query's late counts never repaint the panel; the panel holds its last painted state during the gap rather than flashing. Keystroke to first results on that corpus: `fractions` 4,011 -> 2,075 ms, `math` 22,254 -> 11,083 ms, a six-word query that falls back to OR 93,255 -> 46,584 ms. Neither change alters what the facet counts contain or how many results are returned. Copied byte-identically from the canonical `scolta-php/assets/js/scolta.js`; nothing in this package changed behavior.
 - **Re-vendored the browser bundle (`assets/js/scolta.js`) from scolta-php: `hideEmptyFacets` facet-visibility opt-out**
   ([tag1consulting/scolta-php#239](https://github.com/tag1consulting/scolta-php/pull/239)).
