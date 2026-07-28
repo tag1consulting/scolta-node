@@ -174,6 +174,16 @@ export const FIELD_KINDS: Record<string, FieldKind> = {
   filter_fields: "list",
   filter_field_descriptions: "dict",
   hide_empty_facets: "bool",
+  sayt_enabled: "bool",
+  sayt_min_chars: "int",
+  sayt_debounce_ms: "int",
+  sayt_max_suggestions: "int",
+  sayt_recent_searches: "bool",
+  sayt_max_recent: "int",
+  sayt_expand: "bool",
+  sayt_expand_per_minute: "int",
+  sayt_expansion_delay_ms: "int",
+  sayt_suggestion_action: "string",
   preset: "string",
 };
 
@@ -284,6 +294,33 @@ export class ScoltaConfig {
   filter_fields: string[] = [];
   filter_field_descriptions: Record<string, string> = {};
   hide_empty_facets = true;
+
+  // -- Search as you type (SAYT) --
+  // Ten top-level browser settings, not scoring keys: toJsScoringConfig() stays
+  // at exactly 40, and each of these is emitted top-level by toBrowserConfig()
+  // and read by scolta.js as `instanceConfig.<camelCase>` (the hideEmptyFacets
+  // pattern). Every default below is byte-equal to the fallback the browser
+  // bundle uses when the key is absent. Full behaviour: scolta-php docs/SAYT.md.
+  sayt_enabled = true;
+  sayt_min_chars = 2;
+  sayt_debounce_ms = 150;
+  sayt_max_suggestions = 6;
+  sayt_recent_searches = true;
+  sayt_max_recent = 3;
+  sayt_expand = true;
+  /**
+   * Client-side sliding-window cap on SAYT expansion calls per minute.
+   *
+   * SAYT expansions share the platform's AI flood budget with committed
+   * searches, so an unbudgeted suggest path would spend a visitor's whole
+   * allowance on prefixes and starve the search they actually ran.
+   */
+  sayt_expand_per_minute = 6;
+  sayt_expansion_delay_ms = 500;
+  sayt_suggestion_action = "navigate";
+
+  /** Accepted values for {@link sayt_suggestion_action}. */
+  static readonly SAYT_SUGGESTION_ACTIONS = ["navigate", "search"] as const;
 
   // -- Scoring preset --
   preset = "";
@@ -433,7 +470,33 @@ export class ScoltaConfig {
       pagefindPath: this.pagefind_index_path + "/pagefind.js",
       filterFieldDescriptions: this.filter_field_descriptions,
       hideEmptyFacets: this.hide_empty_facets,
+      // Search as you type — top-level, not scoring keys.
+      saytEnabled: this.sayt_enabled,
+      saytMinChars: this.sayt_min_chars,
+      saytDebounceMs: this.sayt_debounce_ms,
+      saytMaxSuggestions: this.sayt_max_suggestions,
+      saytRecentSearches: this.sayt_recent_searches,
+      saytMaxRecent: this.sayt_max_recent,
+      saytExpand: this.sayt_expand,
+      saytExpandPerMinute: this.sayt_expand_per_minute,
+      saytExpansionDelayMs: this.sayt_expansion_delay_ms,
+      saytSuggestionAction: this.normalizedSaytSuggestionAction(),
     };
+  }
+
+  /**
+   * The suggestion action, clamped to a value the browser bundle understands.
+   *
+   * An unrecognized configured value reaches the browser as `navigate` rather
+   * than as itself, so the clamp happens once here instead of being
+   * rediscovered client-side.
+   */
+  normalizedSaytSuggestionAction(): string {
+    return (ScoltaConfig.SAYT_SUGGESTION_ACTIONS as readonly string[]).includes(
+      this.sayt_suggestion_action,
+    )
+      ? this.sayt_suggestion_action
+      : "navigate";
   }
 
   /** AI client config object for constructing an AiClient. */
