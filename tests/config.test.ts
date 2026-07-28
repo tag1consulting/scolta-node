@@ -177,6 +177,121 @@ describe("ScoltaConfig", () => {
     expect(b["hideEmptyFacets"]).toBe(false);
   });
 
+  // -- Search as you type ------------------------------------------------
+
+  /** The ten wire keys, their browser names, and the bundle's own fallbacks. */
+  const SAYT: ReadonlyArray<readonly [string, string, boolean | number | string]> = [
+    ["sayt_enabled", "saytEnabled", true],
+    ["sayt_min_chars", "saytMinChars", 2],
+    ["sayt_debounce_ms", "saytDebounceMs", 150],
+    ["sayt_max_suggestions", "saytMaxSuggestions", 6],
+    ["sayt_recent_searches", "saytRecentSearches", true],
+    ["sayt_max_recent", "saytMaxRecent", 3],
+    ["sayt_expand", "saytExpand", true],
+    ["sayt_expand_per_minute", "saytExpandPerMinute", 6],
+    ["sayt_expansion_delay_ms", "saytExpansionDelayMs", 500],
+    ["sayt_suggestion_action", "saytSuggestionAction", "navigate"],
+  ];
+
+  it("every sayt default is byte-equal to the scolta.js fallback", () => {
+    const config = new ScoltaConfig() as unknown as Record<string, unknown>;
+    for (const [wire, , expected] of SAYT) {
+      expect(config[wire], `${wire} must default to the browser bundle's own fallback`).toBe(
+        expected,
+      );
+    }
+  });
+
+  it("to_browser_config carries all ten sayt keys top-level, not under scoring", () => {
+    const b = new ScoltaConfig().toBrowserConfig();
+    const scoring = b["scoring"] as Record<string, unknown>;
+    for (const [, browser, expected] of SAYT) {
+      expect(b[browser], `${browser} must be emitted top-level`).toBe(expected);
+      expect(browser in scoring, `${browser} must not be a scoring key`).toBe(false);
+    }
+  });
+
+  it("sayt keys map from snake_case input", () => {
+    const b = ScoltaConfig.fromObject({
+      sayt_enabled: false,
+      sayt_min_chars: 1,
+      sayt_debounce_ms: 400,
+      sayt_max_suggestions: 10,
+      sayt_recent_searches: false,
+      sayt_max_recent: 5,
+      sayt_expand: false,
+      sayt_expand_per_minute: 2,
+      sayt_expansion_delay_ms: 800,
+      sayt_suggestion_action: "search",
+    }).toBrowserConfig();
+
+    expect(b["saytEnabled"]).toBe(false);
+    expect(b["saytMinChars"]).toBe(1);
+    expect(b["saytDebounceMs"]).toBe(400);
+    expect(b["saytMaxSuggestions"]).toBe(10);
+    expect(b["saytRecentSearches"]).toBe(false);
+    expect(b["saytMaxRecent"]).toBe(5);
+    expect(b["saytExpand"]).toBe(false);
+    expect(b["saytExpandPerMinute"]).toBe(2);
+    expect(b["saytExpansionDelayMs"]).toBe(800);
+    expect(b["saytSuggestionAction"]).toBe("search");
+  });
+
+  it("sayt booleans follow PHP falsy-string semantics", () => {
+    // Only "" and "0" are falsy, as everywhere else in this config.
+    expect(ScoltaConfig.fromObject({ sayt_enabled: "0" }).sayt_enabled).toBe(false);
+    expect(ScoltaConfig.fromObject({ sayt_enabled: "" }).sayt_enabled).toBe(false);
+    expect(ScoltaConfig.fromObject({ sayt_enabled: "false" }).sayt_enabled).toBe(true);
+    expect(ScoltaConfig.fromObject({ sayt_expand: false }).sayt_expand).toBe(false);
+    expect(ScoltaConfig.fromObject({ sayt_recent_searches: 0 }).sayt_recent_searches).toBe(false);
+  });
+
+  /**
+   * The new int fields follow the existing int handling exactly: a numeric
+   * string coerces, and a fractional value truncates rather than throwing.
+   * This differs from scolta-python, which raises on non-integer input; that
+   * difference predates SAYT and is deliberately left alone here.
+   */
+  it("sayt integers coerce and truncate like every other int field", () => {
+    const c = ScoltaConfig.fromObject({
+      sayt_min_chars: "3",
+      sayt_debounce_ms: "250",
+      sayt_max_suggestions: 8.9,
+      sayt_max_recent: "4.7",
+    });
+    expect(c.sayt_min_chars).toBe(3);
+    expect(c.sayt_debounce_ms).toBe(250);
+    expect(c.sayt_max_suggestions).toBe(8);
+    expect(c.sayt_max_recent).toBe(4);
+  });
+
+  it("a non-numeric sayt int keeps the default and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const c = ScoltaConfig.fromObject({ sayt_min_chars: "soon" });
+      expect(c.sayt_min_chars).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("sayt keys stay at their defaults when absent", () => {
+    const c = ScoltaConfig.fromObject({ site_name: "x" }) as unknown as Record<string, unknown>;
+    for (const [wire, , expected] of SAYT) {
+      expect(c[wire]).toBe(expected);
+    }
+  });
+
+  it("an unrecognized suggestion action reaches the browser as navigate", () => {
+    const c = ScoltaConfig.fromObject({ sayt_suggestion_action: "teleport" });
+    // The configured value is kept as-is on the object, exactly as scolta-php
+    // keeps it; only what crosses to the browser is clamped.
+    expect(c.sayt_suggestion_action).toBe("teleport");
+    expect(c.normalizedSaytSuggestionAction()).toBe("navigate");
+    expect(c.toBrowserConfig()["saytSuggestionAction"]).toBe("navigate");
+  });
+
   it("specificity and filter-hint scoring defaults match the scolta.js fallbacks", () => {
     const js = new ScoltaConfig().toJsScoringConfig();
     expect(js["SPECIFICITY_WEIGHTING"]).toBe(true);
