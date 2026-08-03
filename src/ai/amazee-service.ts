@@ -59,10 +59,10 @@ export class AmazeeAiService extends AiServiceAdapter {
    * Without it, behavior is unchanged: the failure propagates untracked.
    *
    * Port of the PHP `AiServiceAdapter::setKeyExpiryRecovery()` — it lives on
-   * this class rather than the base adapter because in this binding the
-   * auto-provisioned path (Amazee storage and all) IS this class; recovery
-   * never applies to the explicit-key path, which {@link noteAuthFailure}
-   * also guards against directly.
+   * this class rather than the base adapter because in this binding the Amazee
+   * path (Amazee storage and all) IS this class; recovery never applies to the
+   * explicit-key path, which {@link noteAuthFailure} also guards against
+   * directly.
    */
   setKeyExpiryRecovery(recovery: KeyExpiryRecovery): void {
     this.keyRecovery = recovery;
