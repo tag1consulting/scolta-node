@@ -114,7 +114,7 @@ class RecordingClient extends AiClient {
   lastModel: string | undefined = undefined;
   lastTemperature: number | undefined = undefined;
   constructor() {
-    super({});
+    super({ provider: "anthropic" });
   }
   override async message(
     _systemPrompt: string,
@@ -138,19 +138,19 @@ class RecordingAdapter extends AiServiceAdapter {
 
 describe("AiServiceAdapter messageForOperation temperature", () => {
   it("pins temperature 0 for expand_query", async () => {
-    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }));
     await adapter.messageForOperation("expand_query", "sys", "user");
     expect(adapter.recorder.lastTemperature).toBe(0);
   });
 
   it("leaves temperature undefined for summarize", async () => {
-    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }));
     await adapter.messageForOperation("summarize", "sys", "user");
     expect(adapter.recorder.lastTemperature).toBeUndefined();
   });
 
   it("leaves temperature undefined for follow_up", async () => {
-    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({}));
+    const adapter = new RecordingAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }));
     await adapter.messageForOperation("follow_up", "sys", "user");
     expect(adapter.recorder.lastTemperature).toBeUndefined();
   });
@@ -161,7 +161,7 @@ describe("AiServiceAdapter messageForOperation temperature", () => {
 class ThrowingClient extends AiClient {
   private toThrow: unknown;
   constructor(toThrow: unknown) {
-    super({});
+    super({ provider: "anthropic" });
     this.toThrow = toThrow;
   }
   override async message(): Promise<string> {
@@ -192,7 +192,7 @@ class HookAdapter extends AiServiceAdapter {
 describe("AiServiceAdapter budget hook", () => {
   it("message invokes budget hook on client exception", async () => {
     const original = new Error("Budget has been exceeded!");
-    const adapter = new HookAdapter(ScoltaConfig.fromObject({}), new ThrowingClient(original));
+    const adapter = new HookAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }), new ThrowingClient(original));
     await expect(adapter.message("sys", "user")).rejects.toBe(original);
     expect(adapter.hookCalls).toBe(1);
     expect(adapter.hookArg).toBe(original);
@@ -200,14 +200,14 @@ describe("AiServiceAdapter budget hook", () => {
 
   it("conversation invokes budget hook on client exception", async () => {
     const original = new Error("Budget has been exceeded!");
-    const adapter = new HookAdapter(ScoltaConfig.fromObject({}), new ThrowingClient(original));
+    const adapter = new HookAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }), new ThrowingClient(original));
     await expect(adapter.conversation("sys", [{ role: "user", content: "hi" }])).rejects.toBe(original);
     expect(adapter.hookCalls).toBe(1);
   });
 
   it("messageForOperation invokes budget hook on client exception", async () => {
     const original = new Error("Budget has been exceeded!");
-    const adapter = new HookAdapter(ScoltaConfig.fromObject({}), new ThrowingClient(original));
+    const adapter = new HookAdapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }), new ThrowingClient(original));
     await expect(adapter.messageForOperation("expand_query", "sys", "user")).rejects.toBe(original);
     expect(adapter.hookCalls).toBe(1);
   });
@@ -224,7 +224,7 @@ describe("AiServiceAdapter budget hook", () => {
         return this.stub;
       }
     }
-    const adapter = new Adapter(ScoltaConfig.fromObject({}), new ThrowingClient(original));
+    const adapter = new Adapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }), new ThrowingClient(original));
     await expect(adapter.message("sys", "user")).rejects.toThrow(/some unrelated client failure/);
   });
 
@@ -243,7 +243,7 @@ describe("AiServiceAdapter budget hook", () => {
         throw new TypeError("converted: " + String((exc as Error).message));
       }
     }
-    const adapter = new Adapter(ScoltaConfig.fromObject({}), new ThrowingClient(original));
+    const adapter = new Adapter(ScoltaConfig.fromObject({ ai_provider: "anthropic" }), new ThrowingClient(original));
     await expect(adapter.message("sys", "user")).rejects.toThrow(/converted: Budget has been exceeded!/);
   });
 });

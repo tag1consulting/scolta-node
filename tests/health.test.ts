@@ -37,7 +37,7 @@ describe("HealthChecker", () => {
   it("ok when index exists and key configured", async () => {
     fs.mkdirSync(path.join(tmp, "pagefind"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "pagefind", "pagefind.js"), "//");
-    const config = ScoltaConfig.fromObject({ ai_api_key: "sk-x" });
+    const config = ScoltaConfig.fromObject({ ai_provider: "anthropic", ai_api_key: "sk-x" });
     const report = await new HealthChecker(config, tmp, unavailableBinary).check();
     expect(report.status).toBe("ok");
     expect(report.indexExists).toBe(true);
@@ -45,7 +45,7 @@ describe("HealthChecker", () => {
   });
 
   it("reports binary upgrade unavailable when indexer=binary but Node API missing", async () => {
-    const config = ScoltaConfig.fromObject({ indexer: "binary", ai_api_key: "sk-x" });
+    const config = ScoltaConfig.fromObject({ ai_provider: "anthropic", indexer: "binary", ai_api_key: "sk-x" });
     fs.mkdirSync(path.join(tmp, "pagefind"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "pagefind", "pagefind.js"), "//");
     const report = await new HealthChecker(config, tmp, unavailableBinary).check();
@@ -55,7 +55,7 @@ describe("HealthChecker", () => {
   });
 
   it("indexerActive binary when configured and available", async () => {
-    const config = ScoltaConfig.fromObject({ indexer: "binary", ai_api_key: "sk-x" });
+    const config = ScoltaConfig.fromObject({ ai_provider: "anthropic", indexer: "binary", ai_api_key: "sk-x" });
     fs.mkdirSync(path.join(tmp, "pagefind"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "pagefind", "pagefind.js"), "//");
     const report = await new HealthChecker(config, tmp, availableBinary).check();
@@ -76,13 +76,15 @@ describe("HealthChecker AI usability", () => {
     fs.writeFileSync(path.join(tmp, "pagefind", "pagefind.js"), "//");
   }
 
-  it("amazee-provisioned install (no explicit key, stored creds) is configured + usable, not degraded", async () => {
+  it("amazee-connected install (no explicit key, stored creds) is configured + usable, not degraded", async () => {
     writeIndex();
     const storage = new MemoryConfigStorage();
     storage.store("lt-token", "https://llm.amazee.ai", "eu");
 
+    // A site with stored Amazee credentials selected a provider to get them:
+    // "amazee" in configuration is the opt-in that permitted the connection.
     const report = await new HealthChecker(
-      new ScoltaConfig(),
+      ScoltaConfig.fromObject({ ai_provider: "amazee" }),
       tmp,
       unavailableBinary,
       storage,
@@ -97,7 +99,7 @@ describe("HealthChecker AI usability", () => {
 
   it("explicit key behaves as before: configured + usable", async () => {
     writeIndex();
-    const config = ScoltaConfig.fromObject({ ai_api_key: "sk-x" });
+    const config = ScoltaConfig.fromObject({ ai_provider: "anthropic", ai_api_key: "sk-x" });
 
     const report = await new HealthChecker(
       config,
@@ -152,7 +154,7 @@ describe("HealthChecker AI usability", () => {
     cache.set(KeyExpiryRecovery.CACHE_KEY_AUTH_FAILURE, false, 1);
 
     const report = await new HealthChecker(
-      ScoltaConfig.fromObject({ ai_api_key: "sk-recovered" }),
+      ScoltaConfig.fromObject({ ai_provider: "anthropic", ai_api_key: "sk-recovered" }),
       tmp,
       unavailableBinary,
       null,
@@ -168,7 +170,7 @@ describe("HealthChecker AI usability", () => {
     writeIndex();
 
     const withKey = await new HealthChecker(
-      ScoltaConfig.fromObject({ ai_api_key: "sk-x" }),
+      ScoltaConfig.fromObject({ ai_provider: "anthropic", ai_api_key: "sk-x" }),
       tmp,
       unavailableBinary,
     ).check();

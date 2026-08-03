@@ -8,6 +8,7 @@
  */
 
 import type { ScoltaConfig } from "../config.js";
+import { ApiKeyMissingError } from "../errors.js";
 import { AiClient, type ChatMessage } from "./client.js";
 import * as prompts from "./prompts.js";
 
@@ -106,7 +107,22 @@ export class AiServiceAdapter {
 
   // -- overridable hooks ----------------------------------------------------
 
+  /**
+   * Get the built-in AiClient, refusing to build one with no provider.
+   *
+   * Scolta ships without a provider selected, and an unselected provider means
+   * AI is off — not that it is Anthropic. Constructing a client here would pick
+   * a vendor on the site's behalf, so instead this throws the same
+   * {@link ApiKeyMissingError} the callers already degrade on: the query goes
+   * out unexpanded and no summary is produced, which is what "AI off" looks
+   * like from the outside.
+   */
   protected getClient(): AiClient {
+    if (this.config.ai_provider.trim() === "") {
+      throw new ApiKeyMissingError(
+        "No AI provider is selected, so AI features are off. Set ai_provider in your Scolta configuration.",
+      );
+    }
     if (this.client === null) {
       this.client = this.createClient();
     }

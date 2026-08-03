@@ -10,7 +10,8 @@ import { ScoltaConfig } from "../src/config.js";
 describe("ScoltaConfig", () => {
   it("defaults", () => {
     const c = new ScoltaConfig();
-    expect(c.ai_provider).toBe("anthropic");
+    // No default provider. An untouched config has AI off, not Anthropic.
+    expect(c.ai_provider).toBe("");
     expect(c.indexer).toBe("auto");
     expect(c.expand_subword_max_frequency).toBe(0.05);
     expect(c.expansion_combine_mode).toBe("relevance_union");

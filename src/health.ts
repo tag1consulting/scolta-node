@@ -21,7 +21,10 @@ const STALE_URL = /^\/[a-zA-Z0-9_-]+\.html$/;
 
 export interface HealthReport {
   status: "ok" | "degraded";
+  /** The selected provider, or "" when none has been selected. Never defaulted. */
   aiProvider: string;
+  /** Whether a provider has been selected at all. False means AI is off. */
+  aiProviderSelected: boolean;
   /** Credentials are present: an explicit key OR stored Amazee credentials. */
   aiConfigured: boolean;
   /** Configured AND not known to be expired/auth-failing. */
@@ -42,7 +45,7 @@ export interface HealthReport {
 export class HealthChecker {
   /**
    * @param amazeeStorage Optional Amazee credential store (the same instance
-   *   the AmazeeAiService uses). When provided, auto-provisioned installs —
+   *   the AmazeeAiService uses). When provided, Amazee-connected installs —
    *   which have no explicit `ai_api_key` — count as AI-configured instead of
    *   reporting "degraded" forever while AI works fine.
    * @param cache Optional cache used to read the {@link KeyExpiryRecovery}
@@ -64,7 +67,7 @@ export class HealthChecker {
    *
    * `aiConfigured` states that credentials are present — an explicit key or
    * stored Amazee-provisioned credentials (the explicit-key-only check was
-   * the inverse of the php/python expired-key lie: a happily auto-provisioned
+   * the inverse of the php/python expired-key lie: a happily connected
    * install reported "degraded" forever). `aiUsable` additionally requires
    * that the credentials are not known to be expired/auth-failing.
    */
@@ -83,7 +86,12 @@ export class HealthChecker {
     // the cache at call time; reading that marker here keeps health truthful
     // without adding a live API call per health request.
     const aiAuthFailing = this.cache !== null && KeyExpiryRecovery.isAuthFailingIn(this.cache);
-    const aiUsable = aiConfigured && !aiAuthFailing;
+    // No provider selected means AI is off, whatever else is present. A key can
+    // exist without a provider — an environment variable set before anybody
+    // chose one — and reporting that as usable would restore by the back door
+    // the assumption that an unselected provider is Anthropic.
+    const providerSelected = this.config.ai_provider.trim() !== "";
+    const aiUsable = aiConfigured && providerSelected && !aiAuthFailing;
 
     let status: "ok" | "degraded" = "ok";
     if (!indexExists || !aiUsable) status = "degraded";
@@ -101,7 +109,11 @@ export class HealthChecker {
 
     return {
       status,
-      aiProvider: this.config.ai_provider || "anthropic",
+      // "" means no provider has been selected, which is what a fresh install
+      // reports. Never coalesced to "anthropic": claiming a provider nobody
+      // chose is the failure this field exists to expose.
+      aiProvider: this.config.ai_provider,
+      aiProviderSelected: providerSelected,
       aiConfigured,
       aiUsable,
       aiAuthFailing,

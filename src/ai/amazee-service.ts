@@ -1,20 +1,33 @@
 /**
  * Amazee-aware AI service.
  *
- * Extends {@link AiServiceAdapter} so the built-in (or auto-provisioned) AI path
- * works with no explicit key: when no `ai_api_key` is configured it provisions a
- * free Amazee.ai trial on first use, then drives the OpenAI-compatible
- * {@link AiClient} against the returned LiteLLM gateway — mirroring the Django
- * adapter's `config_overrides()` + `maybe_auto_provision()`. An explicit key
- * always wins (the custom-Anthropic / custom-provider path).
+ * Extends {@link AiServiceAdapter} to drive the OpenAI-compatible
+ * {@link AiClient} against the Amazee LiteLLM gateway using stored credentials.
+ *
+ * **The opt-in is `ai_provider = "amazee"` in configuration**, which in a
+ * headless framework only a developer can set. That value, and nothing else,
+ * permits this class to establish the free demo connection on first use: it is
+ * an explicit choice expressed in code, the same act as clicking "Try the demo"
+ * in a CMS admin. With the provider unset or set to anything else, no demo is
+ * provisioned and no outbound Amazee call is made, whatever else is configured.
+ * First-use provisioning is idempotent — once credentials are stored, later
+ * calls reuse them. An explicit `ai_api_key` always wins (the custom-Anthropic /
+ * custom-provider path) and suppresses Amazee entirely.
+ *
+ * These frameworks have no admin UI, so there is no in-app recovery when a
+ * connection's credit runs out: AI degrades and `/health` reports it. Re-authing
+ * is an explicit ops action — set your own credentials, or run the provisioning
+ * path again after connecting an account.
  */
 
 import type { ScoltaConfig } from "../config.js";
 import { AiClient, type ChatMessage } from "./client.js";
 import { AutoProvisioner } from "./amazee/auto-provisioner.js";
 import { BudgetAwareProviderDecorator } from "./amazee/budget-decorator.js";
-import { AmazeeBudgetExceededException } from "./amazee/exceptions.js";
-import type { AmazeeClient } from "./amazee/client.js";
+import { AmazeeApiException, AmazeeBudgetExceededException } from "./amazee/exceptions.js";
+import { AmazeeClient } from "./amazee/client.js";
+import { AmazeeModelResolver } from "./amazee/model-resolver.js";
+import { AmazeeTrialProvisioner } from "./amazee/trial-provisioner.js";
 import type { KeyExpiryRecovery } from "./amazee/key-expiry-recovery.js";
 import type { ConfigStorage } from "./amazee/storage.js";
 import { AiServiceAdapter } from "./service.js";
@@ -101,9 +114,9 @@ export class AmazeeAiService extends AiServiceAdapter {
   /**
    * Record an auth-class failure of the stored Amazee credentials.
    *
-   * When recovery is wired and this service is on the auto-provisioned path
-   * (no explicit key — an explicit key failing auth is the user's key to fix,
-   * not Amazee's), an auth-class failure (never budget-exhaustion —
+   * When recovery is wired and this service is on the Amazee path (no explicit
+   * key — an explicit key failing auth is the user's key to fix, not Amazee's),
+   * an auth-class failure (never budget-exhaustion —
    * {@link KeyExpiryRecovery} excludes it) marks AI as degraded for `/health`
    * and flags the site for admin re-authentication. It never retries: the
    * caller's original error propagates and the request degrades gracefully
@@ -143,6 +156,40 @@ export class AmazeeAiService extends AiServiceAdapter {
       return new AiClient(config.toAiClientConfig());
     }
 
+    // THE OPT-IN GATE. Establishing a demo connection is permitted only because
+    // a developer wrote ai_provider = "amazee" in configuration. Anything else —
+    // unset, "anthropic", "openai" — reaches no provisioning path and makes no
+    // outbound Amazee call. Everything below this line assumes the site opted
+    // in.
+    if (config.ai_provider !== "amazee") {
+      return new AiClient(config.toAiClientConfig());
+    }
+
+    // Idempotent: only a store with nothing in it establishes a connection, so
+    // the second and every later call reuses the stored credentials.
+    if (this.storage.load() === null) {
+      const amazeeClient = this.amazeeClient ?? new AmazeeClient();
+      try {
+        const result = await new AmazeeTrialProvisioner(
+          amazeeClient,
+          this.storage,
+          null,
+          new AmazeeModelResolver(amazeeClient),
+        ).provision();
+        if (result.aiModel || result.aiExpansionModel) {
+          this.storage.storeModels(result.aiModel ?? "", result.aiExpansionModel ?? "");
+        }
+      } catch (exc) {
+        if (!(exc instanceof AmazeeApiException)) {
+          throw exc;
+        }
+        // The control plane is unreachable or refused. Fall through to the
+        // key-less client below, which degrades to unexpanded/no-summary.
+      }
+    }
+
+    // Self-heal only: re-resolve model names against credentials already
+    // stored. This establishes nothing.
     await AutoProvisioner.ensureAiAvailable(this.storage, {
       hasExplicitApiKey: false,
       onModelsResolved: (aiModel, aiExpansionModel) => this.storage.storeModels(aiModel, aiExpansionModel),
