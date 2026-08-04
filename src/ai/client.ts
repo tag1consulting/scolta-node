@@ -71,7 +71,14 @@ export class AiClient {
   private readonly fetchImpl: FetchLike;
 
   constructor(config: AiClientConfig, fetchImpl?: FetchLike) {
-    this.provider = config.provider ?? "anthropic";
+    // No default. An absent or empty provider is "nobody selected one", and
+    // that is an error rather than Anthropic: a client must never be built on
+    // an assumption about which vendor the site meant. Callers are expected to
+    // keep AI off instead of constructing one.
+    this.provider = config.provider ?? "";
+    if (this.provider.trim() === "") {
+      throw new Error("No AI provider selected. Set one of: anthropic, openai.");
+    }
     this.apiKey = config.api_key ?? "";
     this.model = config.model ?? "claude-sonnet-4-5-20250929";
     this.apiVersion = config.api_version ?? ANTHROPIC_API_VERSION;

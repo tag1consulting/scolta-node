@@ -29,7 +29,10 @@ function client(config: AiClientConfig, responder: Responder): { client: AiClien
     const payload = r.body !== undefined ? r.body : JSON.stringify(r.json ?? {});
     return new Response(payload, { status: r.status ?? 200, headers: r.headers });
   };
-  return { client: new AiClient(config, fetchImpl), captured };
+  // A provider is required — there is no default. These cases are about request
+  // shape, error mapping and timeouts, not provider selection, so the helper
+  // supplies one unless the case sets its own.
+  return { client: new AiClient({ provider: "anthropic", ...config }, fetchImpl), captured };
 }
 
 describe("AiClient", () => {
@@ -209,7 +212,7 @@ describe("AiClient", () => {
       const fetchImpl: typeof fetch = async () => {
         throw new DOMException("The operation was aborted.", name);
       };
-      const c = new AiClient({ api_key: "k", timeout: 7 }, fetchImpl);
+      const c = new AiClient({ provider: "anthropic", api_key: "k", timeout: 7 }, fetchImpl);
       const err = await c.message("s", "u").catch((e: unknown) => e);
       expect(err).toBeInstanceOf(AiTimeoutError);
       expect((err as Error).message).toContain("timed out after 7s");
@@ -220,7 +223,7 @@ describe("AiClient", () => {
     const fetchImpl: typeof fetch = async () => {
       throw new TypeError("fetch failed");
     };
-    const c = new AiClient({ api_key: "k" }, fetchImpl);
+    const c = new AiClient({ provider: "anthropic", api_key: "k" }, fetchImpl);
     const err = await c.message("s", "u").catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(AiTimeoutError);
     expect((err as Error).message).toContain("request failed");

@@ -1,8 +1,10 @@
 /**
  * Amazee subsystem tests (mocked HTTP).
  *
- * Covers the auto-provisioning contract (fires only when there is no explicit
- * key AND no stored credentials; idempotent), model resolution, the budget
+ * Covers the self-heal contract (AutoProvisioner establishes nothing and only
+ * re-resolves model names against credentials already stored), the opt-in gate
+ * on AmazeeAiService (ai_provider === "amazee" and nothing else permits
+ * first-use demo provisioning; idempotent), model resolution, the budget
  * decorator, and the AmazeeAiService client-resolution + budget conversion.
  */
 
@@ -13,7 +15,9 @@ import { AiClient } from "../../src/ai/client.js";
 import { ApiKeyMissingError } from "../../src/errors.js";
 import {
   AmazeeClient,
+  AmazeeConnectionSource,
   AmazeeModelResolver,
+  AmazeeTrialProvisioner,
   AutoProvisioner,
   BudgetAwareProviderDecorator,
   AmazeeBudgetExceededException,
@@ -57,29 +61,44 @@ afterEach(() => {
 });
 
 describe("AutoProvisioner.ensureAiAvailable", () => {
-  it("provisions a trial when there is no explicit key and no stored creds", async () => {
+  it("never mints and never calls out when there are no stored creds", async () => {
+    // Replaces a test that asserted the opposite — that an empty store caused a
+    // trial to be provisioned here. That behaviour is gone: a connection is
+    // established only by an explicit AmazeeTrialProvisioner.provision() call,
+    // which in these frameworks is gated on ai_provider === "amazee". With
+    // nothing stored there is nothing to heal, so this makes no outbound call.
     const storage = new MemoryConfigStorage();
     const models: string[] = [];
+    const attempted: string[] = [];
     const provisioned = await AutoProvisioner.ensureAiAvailable(storage, {
       hasExplicitApiKey: false,
-      client: amazeeClient(provisioningResponder()),
+      client: amazeeClient((url) => {
+        attempted.push(url);
+        throw new Error(`no outbound Amazee call expected, got ${url}`);
+      }),
       onModelsResolved: (a, e) => {
         models.push(a, e);
         storage.storeModels(a, e);
       },
     });
-    expect(provisioned).toBe(true);
+    expect(provisioned).toBe(false);
+    expect(storage.load()).toBeNull();
+    expect(models).toEqual([]);
+    expect(attempted).toEqual([]);
+  });
+
+  it("records demo provenance when an explicit provision establishes the connection", async () => {
+    const storage = new MemoryConfigStorage();
+    const client = amazeeClient(provisioningResponder());
+
+    await new AmazeeTrialProvisioner(client, storage, null, new AmazeeModelResolver(client)).provision();
+
     expect(storage.load()).toEqual({
       litellm_token: "lt-token",
       litellm_api_url: "https://llm.amazee.ai",
       region: "eu",
     });
-    // Highest-version sonnet/haiku resolved and stored.
-    expect(models).toEqual(["claude-sonnet-4-5", "claude-haiku-3-5"]);
-    expect(storage.storedModels()).toEqual({
-      ai_model: "claude-sonnet-4-5",
-      ai_expansion_model: "claude-haiku-3-5",
-    });
+    expect(storage.loadConnectionSource?.()).toBe(AmazeeConnectionSource.Demo);
   });
 
   it("is a no-op when an explicit key is configured", async () => {

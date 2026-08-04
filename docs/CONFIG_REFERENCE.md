@@ -9,7 +9,7 @@ out of sync with the code.
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `ai_provider` | string | `anthropic` |  |
+| `ai_provider` | string | `(empty)` | AI provider identifier (`anthropic`, `openai`, `amazee`). No default: empty means no provider has been selected and AI features are off. Setting it in code is the manual opt-in, and `amazee` is what permits first-use demo provisioning. |
 | `ai_api_key` | string | `(empty)` |  |
 | `ai_model` | string | `claude-sonnet-4-5-20250929` |  |
 | `ai_expansion_model` | string | `(empty)` |  |

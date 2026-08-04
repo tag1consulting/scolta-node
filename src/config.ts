@@ -198,7 +198,19 @@ const warnedInvalidNumbers = new Set<string>();
 
 export class ScoltaConfig {
   // -- AI provider --
-  ai_provider = "anthropic";
+  /**
+   * The selected AI provider, or "" when none has been selected.
+   *
+   * There is no default. An install that nobody has configured has AI off:
+   * search works, no provider is assumed, and Anthropic in particular is not
+   * silently assumed. Setting this is always a deliberate act — in these
+   * headless frameworks, a developer setting the value in code or env is the
+   * manual opt-in, and it is also what gates first-use Amazee provisioning.
+   *
+   * Going-forward only: a value already persisted by a site is read as-is, and
+   * nothing rewrites it.
+   */
+  ai_provider = "";
   ai_api_key = "";
   ai_model = "claude-sonnet-4-5-20250929";
   ai_expansion_model = "";

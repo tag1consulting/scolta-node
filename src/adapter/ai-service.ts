@@ -12,8 +12,9 @@ import type { ScoltaConfig } from "../config.js";
 
 /**
  * Default AI service: when the resolved provider is `amazee`, use the
- * auto-provisioning {@link AmazeeAiService} (free LiteLLM trial on first use,
- * no key required) backed by a filesystem credential store under the state
+ * Amazee-backed {@link AmazeeAiService} (opted into with `ai_provider =
+ * "amazee"`, which establishes the free LiteLLM demo on first use) backed by a
+ * filesystem credential store under the state
  * dir. Otherwise the plain {@link AiServiceAdapter} (explicit key /
  * framework AI).
  */
