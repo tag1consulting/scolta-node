@@ -1,4 +1,4 @@
-# MAINTAINING — scolta-node
+# Maintaining scolta-node
 
 The Node/TypeScript binding: a Pagefind index builder plus an AI proxy. It follows scolta-php closely,
 using scolta-python as the structural model. Published on npm as `scolta`.
