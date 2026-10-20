@@ -10,6 +10,7 @@ export default tseslint.config(
       "coverage/**",
       "src/index/stemmer-wasm/**", // vendored wasm-pack output (generated)
       "tools/**", // Rust crate sources for the stemmer WASM/golden
+      "scolta-core-src/**", // scolta-core checkout that CI places in the workspace
     ],
   },
   js.configs.recommended,
