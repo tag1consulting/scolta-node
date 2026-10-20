@@ -94,7 +94,7 @@
     "@types/proper-lockfile": "^4.1.4",
     "eslint": "^10.7.0",
     "publint": "^0.3.21",
-    "tsup": "^8.0.0",
+    "tsup": "^9.0.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^3.2.6"
